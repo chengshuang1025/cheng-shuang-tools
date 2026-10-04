@@ -11,6 +11,7 @@
  *   url      團購連結（必填）
  *   tag      分類標籤，例如 "教材"、"生活用品"、"食品"（選填）
  *   points   想強調的賣點／腳本方向，可以寫好幾個，例如 ["賣點一", "節慶送禮方向"]（選填，沒填就用 desc）
+ *   worksheet 這檔有搭配親子學習單就寫 true，粉絲頁文案會加上「留言索取學習單」（選填）
  *   start    開賣日期 "YYYY-MM-DD"（選填，沒填代表已經開賣）
  *   end      截止日期 "YYYY-MM-DD"（選填，沒填代表長期有效、不會自動下架）
  *
@@ -30,6 +31,7 @@ const GROUP_BUYS = [
       "馬告茶籽【強力潔淨】：坪林文山包種茶籽渣，富含天然皂素，適合重油污炒鍋",
       "來自廢渣，功用卻一點都不渣；胺基酸溫和親膚，洗後雙手不緊繃"
     ],
+    worksheet: true,  // 粉絲頁文案會加上「留言索取學習單」
     image: "",
     url: "https://www.veganwell.co/one-page-stores/chengshuang1025?utm_source=group&utm_medium=link&utm_campaign=261001-cf",
     tag: "生活用品",
