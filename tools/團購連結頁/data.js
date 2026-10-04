@@ -32,7 +32,7 @@ const GROUP_BUYS = [
       "來自廢渣，功用卻一點都不渣；胺基酸溫和親膚，洗後雙手不緊繃"
     ],
     worksheet: true,  // 粉絲頁文案會加上「留言索取學習單」
-    image: "",
+    image: "assets/veganwell.jpg",
     url: "https://www.veganwell.co/one-page-stores/chengshuang1025?utm_source=group&utm_medium=link&utm_campaign=261001-cf",
     tag: "生活用品",
     start: "2026-10-01",
@@ -41,7 +41,7 @@ const GROUP_BUYS = [
   {
     title: "伊頓果乾",
     desc: "低溫烘乾，吃得到水果濕潤口感的果乾",
-    image: "",
+    image: "assets/eaton.jpg",
     url: "https://p2.groupbuyforms.tw/riyxe",
     tag: "食品",
     start: "2026-09-29",   // 提前開團（原本 10/01）
