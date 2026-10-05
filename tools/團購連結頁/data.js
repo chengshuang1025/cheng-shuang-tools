@@ -56,6 +56,22 @@ const GROUP_BUYS = [
     end: "2026-10-14"
   },
   {
+    title: "波蘭 Marioinex 鬆餅積木",
+    desc: "柔軟好抓、四面都能拼，安靜不吵的波蘭原廠積木",
+    points: [
+      "100% 波蘭原廠製造，波蘭超過 2 萬所幼兒園都在用",
+      "柔軟好抓、隨手一放就能四面拼接，拼的時候不會發出尖銳撞擊聲",
+      "無毒彈性塑料，符合歐盟 EN71 玩具安全標準、通過台灣玩具檢驗",
+      "從 3 歲玩到 13 歲，所有系列都能互相混搭",
+      "踩到也不痛、可以水洗，收拾整理沒壓力"
+    ],
+    image: "",
+    url: "https://www.itsallaboutkids.com.tw/one/Marioinex-chengshuang",
+    tag: "玩具",
+    start: "2026-10-09",
+    end: "2026-10-14"
+  },
+  {
     title: "Plusday 蘋果洋蔥水",
     desc: "無添加糖與防腐劑，喝得到新鮮洋蔥與蘋果",
     image: "",
