@@ -43,15 +43,34 @@ async function loadRounds(selectId) {
   if (error) return toast(errMsg(error));
   S.rounds = data;
   if (!data.length) {
+    S.rid = null; S.products = []; S.items = []; S.demand = [];
     $("roundSel").innerHTML = `<option>還沒有團</option>`;
+    renderAll();
     $("rows").innerHTML = `<div class="card"><p class="hint" style="margin:0">還沒有建立任何團。按上面的「＋ 開新團」建立第一團，再到「商品」分頁加商品。</p></div>`;
     if (isAdmin()) $("newRoundForm").hidden = false;
+    noRoundHint();
     return;
   }
+  noRoundHint();
   S.rid = selectId || (S.rounds.some((r) => r.id === S.rid) ? S.rid : data[0].id);
   $("roundSel").innerHTML = data.map((r) => `<option value="${r.id}" ${r.id === S.rid ? "selected" : ""}>${esc(r.title)}${r.close_date ? `（${md(r.close_date)} 收單）` : ""}</option>`).join("");
   await loadRound();
 }
+// 沒有團時，商品分頁不能加商品，改顯示提示
+function noRoundHint() {
+  const none = !S.rid;
+  $("addProd").hidden = none;
+  document.querySelector("#prodAdd details").hidden = none;
+  let h = $("noRoundMsg");
+  if (!h) { h = document.createElement("p"); h.id = "noRoundMsg"; h.className = "err"; h.style.marginTop = "12px"; $("prodAdd").prepend(h); }
+  h.textContent = "還沒有團，請先按上面的「＋ 開新團」，再加商品。";
+  h.hidden = !none;
+}
+// 找不到團（例如團被刪了）時，重新載入團的清單
+const isGoneRound = (e) => /round_id_fkey|violates foreign key/i.test(e?.message || "");
+async function roundGone() { toast("這一團已經不存在了，已重新整理團的清單"); await loadRounds(); }
+// 切回後台分頁時，自動更新團的清單
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.role && S.role !== "customer") loadRounds(); });
 $("roundSel").onchange = (e) => { S.rid = +e.target.value; loadRound(); };
 $("newRoundBtn").onclick = () => { $("newRoundForm").hidden = false; $("nrTitle").focus(); };
 $("nrCancel").onclick = () => { $("newRoundForm").hidden = true; };
@@ -188,18 +207,20 @@ const noteCell = (p) => `<td class="wrapcell"><textarea id="note-${p.id}" data-n
 
 $("addProd").onsubmit = async (e) => {
   e.preventDefault();
+  if (!S.rid) return toast("請先開新團");
   const row = { round_id: S.rid, code: $("apCode").value.trim(), name: $("apName").value.trim(), price: $("apPrice").value === "" ? null : +$("apPrice").value };
   const { error } = await sb.from("products").insert(row);
-  if (error) return toast(/duplicate|unique/i.test(error.message) ? `代碼「${row.code}」這一團已經用過了` : errMsg(error));
+  if (error) return isGoneRound(error) ? roundGone() : toast(/duplicate|unique/i.test(error.message) ? `代碼「${row.code}」這一團已經用過了` : errMsg(error));
   $("apCode").value = ""; $("apName").value = ""; $("apPrice").value = ""; $("apCode").focus();
   toast(`已加入 ${row.name}`); loadRound();
 };
 $("bulkProdBtn").onclick = async () => {
+  if (!S.rid) return toast("請先開新團");
   const rows = $("bulkProd").value.split("\n").map((l) => l.split(/\t|,|，/).map((x) => x.trim())).filter((a) => a[0] && a[1])
     .map(([code, name, price]) => ({ round_id: S.rid, code, name, price: price ? +String(price).replace(/[^\d.]/g, "") || null : null }));
   if (!rows.length) return toast("沒有讀到商品，請確認每行有代碼和名稱");
   const { error } = await sb.from("products").insert(rows);
-  if (error) return toast(/duplicate|unique/i.test(error.message) ? "有代碼重複了，請檢查後再試" : errMsg(error));
+  if (error) return isGoneRound(error) ? roundGone() : toast(/duplicate|unique/i.test(error.message) ? "有代碼重複了，請檢查後再試" : errMsg(error));
   $("bulkProd").value = ""; toast(`已加入 ${rows.length} 個商品`); loadRound();
 };
 
