@@ -14,6 +14,7 @@ window.GB = {
   esc: (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])),
   fmt: (n) => Number(n || 0).toLocaleString("zh-TW"),
   today: () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Taipei" }),
+  tw: (iso) => new Date(iso).toLocaleString("sv-SE", { timeZone: "Asia/Taipei" }), // "2026-10-05 13:58:00"
   md: (d) => (d ? `${+d.slice(5, 7)}/${+d.slice(8, 10)}` : ""),
   normPhone: (p) => String(p || "").replace(/[^\d]/g, "").replace(/^886/, "0"),
   phoneEmail: (p) => `${GB.normPhone(p)}@${GB_CONFIG.phoneDomain}`,

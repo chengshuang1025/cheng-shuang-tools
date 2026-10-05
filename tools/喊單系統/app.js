@@ -147,7 +147,7 @@ async function loadMine() {
   const pendingBox = pending.map((r) => {
     const list = r.item_ids.map((id) => byId[id]).filter(Boolean);
     return `<div class="card" style="margin:12px 0;border-color:var(--navy);background:var(--navy-soft)">
-      <b>已申請出貨・${md(r.created_at.slice(0, 10))}</b>
+      <b>已申請出貨・${md(GB.tw(r.created_at).slice(0, 10))}</b>
       <p class="hint" style="margin:4px 0 6px">團主開單後就會寄出，運費統一使用全家好賣家 $${r.shipping_fee} 元出貨。</p>
       <div style="font-size:14px">${list.map((i) => `${esc(i.products.name)} ×${i.qty}`).join("、")}</div>
       <div class="money" style="margin-top:4px">商品 $${fmt(sumOf(list))} ＋ 運費 $${r.shipping_fee} ＝ <b>$${fmt(sumOf(list) + r.shipping_fee)}</b></div>

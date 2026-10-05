@@ -327,7 +327,7 @@ async function loadShips() {
     return `<div class="req" style="${isDone ? "border-left-color:var(--ready);opacity:.85" : ""}">
       <div class="req-head">
         <span><span class="nm">${esc(name)}</span>${cp(name)}</span>
-        <span style="font-size:13px;color:var(--muted)">申請 ${md(r.created_at.slice(0, 10))} ${r.created_at.slice(11, 16)}${isDone ? `・已開單 ${md((r.handled_at || "").slice(0, 10))}` : ""}</span>
+        <span style="font-size:13px;color:var(--muted)">申請 ${md(GB.tw(r.created_at).slice(0, 10))} ${GB.tw(r.created_at).slice(11, 16)}${isDone && r.handled_at ? `・已開單 ${md(GB.tw(r.handled_at).slice(0, 10))}` : ""}</span>
       </div>
       ${r.note ? `<div style="font-size:14px;margin-bottom:6px">客人備註：<b>${esc(r.note)}</b>${cp(r.note)}</div>` : ""}
       ${r.customers?.phone ? `<div style="font-size:14px;margin-bottom:6px">手機：${esc(r.customers.phone)}${cp(r.customers.phone)}</div>` : ""}
