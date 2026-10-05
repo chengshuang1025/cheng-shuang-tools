@@ -45,6 +45,12 @@
 .addform .field{margin:0}
 .badge{display:inline-block;min-width:20px;height:20px;line-height:20px;border-radius:10px;background:var(--mustard);color:var(--navy);font-family:var(--f-latin);font-size:12px;font-weight:600;text-align:center;padding:0 6px;margin-left:6px;vertical-align:2px}
 .tab[aria-selected="true"] .badge{background:var(--paper);color:var(--red)}
+.bindcard{background:var(--paper);border:2px solid var(--navy);border-left:8px solid var(--mustard);border-radius:4px;padding:12px 16px;margin-bottom:10px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between}
+.bindcard .nm{font-family:var(--f-head);font-size:17px}
+.bindcard .meta{font-size:13px;color:var(--muted)}
+.bindcard select{max-width:100%}
+.pwbox{display:flex;gap:6px;align-items:center}
+.pwbox input{width:120px;border:1.5px solid var(--navy);border-radius:3px;padding:2px 8px;background:#fffdf7}
 .req{background:var(--paper);border:2px solid var(--navy);border-left:8px solid var(--ship);border-radius:4px;padding:14px 16px;margin-bottom:12px}
 .req-head{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;justify-content:space-between;margin-bottom:8px}
 .req-head .nm{font-family:var(--f-head);font-size:18px}
@@ -119,7 +125,7 @@
       <button class="tab" role="tab" data-p="order" aria-selected="false" type="button">訂貨</button>
       <button class="tab" role="tab" data-p="imp" aria-selected="false" type="button">匯入社團留言</button>
       <button class="tab" role="tab" data-p="view" aria-selected="false" type="button">客人看到的畫面</button>
-      <button class="tab" role="tab" data-p="acct" aria-selected="false" type="button">帳號</button>
+      <button class="tab" role="tab" data-p="acct" aria-selected="false" type="button">帳號<span class="badge" id="acctBadge" hidden></span></button>
     </nav>
 
     <section id="p-ship" hidden>
@@ -191,9 +197,14 @@
     </section>
 
     <section id="p-acct" hidden>
-      <p class="hint">所有登入過的帳號都在這裡。把夥伴的帳號設成「夥伴」，他就能看商品和訂貨，但看不到客人資料。</p>
+      <h2 style="margin-top:0">等你確認綁定的客人</h2>
+      <p class="hint">客人用手機號碼註冊後會出現在這裡，名字是他自己填的「社團 FB 名字」。確認是同一個人後按「確認綁定」，他就看得到自己的喊單。</p>
+      <div id="pendBind"><p class="loading">讀取中…</p></div>
+
+      <h2>所有帳號</h2>
+      <p class="hint">把夥伴的帳號設成「夥伴」，他就能看商品和訂貨，但看不到客人資料。手機帳號的客人忘記密碼時，按「重設密碼」幫他設一組新的，再私訊告訴他。</p>
       <div class="tablewrap"><table>
-        <thead><tr><th>名字</th><th>手機</th><th>登入方式</th><th>身分</th><th>建立日期</th></tr></thead>
+        <thead><tr><th>名字</th><th>手機</th><th>登入方式</th><th>綁定的喊單</th><th>身分</th><th>密碼</th><th>建立日期</th></tr></thead>
         <tbody id="arows"></tbody>
       </table></div>
     </section>

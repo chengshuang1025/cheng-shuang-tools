@@ -124,7 +124,12 @@ async function loadMine() {
   if (error) { $("mine").innerHTML = `<p class="err">${esc(errMsg(error))}</p>`; return; }
   const items = cust?.order_items || [];
   if (!items.length) {
-    $("mine").innerHTML = `<div class="card"><p class="hint" style="margin:0">目前還沒有你的喊單。<br>在社團喊單後，團主匯入就會出現在這裡；也可以直接在下面「正在收單」按 +1。</p></div>`;
+    const user = (await sb.auth.getUser()).data.user;
+    const isPhone = user?.app_metadata?.provider === "email";
+    $("mine").innerHTML = isPhone && !cust
+      ? `<div class="card dashed" style="background:var(--mustard-soft)"><b>帳號已建立，等團主確認中</b>
+          <p class="hint" style="margin:6px 0 0">團主確認你是社團裡的「${esc(me?.display_name || "")}」之後，你在社團喊的單就會出現在這裡，通常不用等太久。<br>也可以先在下面「正在收單」直接按 +1。</p></div>`
+      : `<div class="card"><p class="hint" style="margin:0">目前還沒有你的喊單。<br>在社團喊單後，團主匯入就會出現在這裡；也可以直接在下面「正在收單」按 +1。</p></div>`;
     return;
   }
   const reqs = (cust.ship_requests || []).filter((r) => r.status !== "cancelled");

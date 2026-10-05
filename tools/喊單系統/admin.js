@@ -33,7 +33,7 @@ async function boot(session) {
   }
   showTab(S.tab);
   await loadRounds();
-  if (isAdmin()) { loadShips(); setInterval(loadShips, 60000); }
+  if (isAdmin()) { loadShips(); loadAccounts(); setInterval(() => { loadShips(); loadAccounts(); }, 60000); }
 }
 $("logout").onclick = async () => { await sb.auth.signOut(); location.href = "./"; };
 
@@ -393,15 +393,46 @@ async function loadShips() {
   if (S.tab === "cust") renderRows();
 }
 
-// ---------- 帳號 ----------
+// ---------- 帳號：待綁定、綁定、重設密碼 ----------
+const norm = (t) => String(t || "").toLowerCase().replace(/\s+/g, "");
 async function loadAccounts() {
-  const { data, error } = await sb.from("profiles").select("*").order("created_at", { ascending: false });
-  if (error) return toast(errMsg(error));
-  $("arows").innerHTML = data.map((p) => `<tr>
-    <td>${esc(p.display_name || "（沒有名字）")}${p.id === S.uid ? "（你）" : ""}</td>
-    <td>${esc(p.phone || "—")}</td><td>${p.phone ? "手機" : "Facebook"}</td>
-    <td>${p.id === S.uid ? "管理者" : `<select id="role-${p.id}" data-role="${p.id}" aria-label="身分">${[["customer", "客人"], ["partner", "夥伴"], ["admin", "管理者"]].map(([k, l]) => `<option value="${k}" ${p.role === k ? "selected" : ""}>${l}</option>`).join("")}</select>`}</td>
-    <td>${md(p.created_at.slice(0, 10))}</td></tr>`).join("");
+  const [{ data: accts, error }, { data: custs }] = await Promise.all([
+    sb.rpc("admin_accounts"),
+    sb.from("customers").select("id, fb_name, user_id").order("fb_name"),
+  ]);
+  if (error) { $("pendBind").innerHTML = `<p class="err">${esc(errMsg(error))}</p>`; return; }
+  S.accts = accts; S.allCust = custs || [];
+  const free = S.allCust.filter((c) => !c.user_id);
+  const pending = accts.filter((a) => a.role === "customer" && !a.customer_id && a.provider === "email");
+  $("acctBadge").hidden = !pending.length; $("acctBadge").textContent = pending.length;
+
+  $("pendBind").innerHTML = pending.length ? pending.map((a) => {
+    const sug = free.filter((c) => norm(c.fb_name) === norm(a.display_name));
+    const rest = free.filter((c) => !sug.includes(c));
+    const opts = [...sug.map((c) => `<option value="${c.id}">✓ ${esc(c.fb_name)}（名字相同）</option>`),
+                  ...rest.map((c) => `<option value="${c.id}">${esc(c.fb_name)}</option>`)].join("");
+    return `<div class="bindcard">
+      <div><div class="nm">${esc(a.display_name || "（沒填名字）")}</div>
+        <div class="meta">手機 ${esc(a.phone || "—")}・註冊 ${md(GB.tw(a.created_at).slice(0, 10))}</div></div>
+      ${free.length ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label class="meta" for="bind-${a.id}">綁到社團喊單</label>
+          <select id="bind-${a.id}">${sug.length ? "" : `<option value="">請選擇…</option>`}${opts}</select>
+          <button class="btn red small" type="button" data-bind="${a.id}">確認綁定</button>
+        </div>` : `<div class="meta">社團還沒有沒綁定的喊單。匯入他的喊單後再回來綁定。</div>`}
+    </div>`;
+  }).join("") : `<div class="card"><p class="hint" style="margin:0">目前沒有等你綁定的客人。</p></div>`;
+
+  $("arows").innerHTML = accts.map((p) => {
+    const me = p.id === S.uid;
+    const how = p.provider === "facebook" ? "Facebook" : "手機";
+    return `<tr>
+      <td>${esc(p.display_name || "（沒有名字）")}${me ? "（你）" : ""}</td>
+      <td>${esc(p.phone || "—")}</td><td>${how}</td>
+      <td>${p.customer_id ? `${esc(p.customer_name)} <button class="cp" type="button" data-unbind="${p.customer_id}">解除</button>` : (p.role === "customer" ? `<span style="color:var(--muted)">未綁定</span>` : "—")}</td>
+      <td>${me ? "管理者" : `<select id="role-${p.id}" data-role="${p.id}" aria-label="身分">${[["customer", "客人"], ["partner", "夥伴"], ["admin", "管理者"]].map(([k, l]) => `<option value="${k}" ${p.role === k ? "selected" : ""}>${l}</option>`).join("")}</select>`}</td>
+      <td>${p.provider === "email" && !me ? `<span class="pwbox" id="pw-${p.id}"><button class="btn small" type="button" data-pwopen="${p.id}">重設密碼</button></span>` : "—"}</td>
+      <td>${md(GB.tw(p.created_at).slice(0, 10))}</td></tr>`;
+  }).join("");
 }
 
 // ---------- 事件 ----------
@@ -427,6 +458,37 @@ document.addEventListener("click", async (e) => {
     await sb.from("order_items").update({ shipped_at: null }).in("id", r.item_ids);
     await sb.from("ship_requests").update({ status: "pending", handled_at: null }).eq("id", r.id);
     toast("已改回未處理"); loadShips(); if (S.rid) loadRound();
+    return;
+  }
+  if (b.dataset.bind) {
+    const uid = b.dataset.bind, cid = +$("bind-" + uid).value;
+    if (!cid) return toast("請先選擇要綁定的社團名字");
+    b.disabled = true;
+    const { error } = await sb.rpc("admin_bind_customer", { p_user: uid, p_customer: cid });
+    b.disabled = false;
+    if (error) return toast(errMsg(error));
+    toast("已綁定，客人重新整理就會看到喊單"); loadAccounts(); if (S.rid) loadRound();
+    return;
+  }
+  if (b.dataset.unbind) {
+    if (!confirm("確定解除綁定？解除後這位客人登入就看不到這些喊單了。")) return;
+    const { error } = await sb.rpc("admin_unbind_customer", { p_customer: +b.dataset.unbind });
+    if (error) return toast(errMsg(error));
+    toast("已解除綁定"); loadAccounts(); if (S.rid) loadRound();
+    return;
+  }
+  if (b.dataset.pwopen) {
+    const id = b.dataset.pwopen;
+    $("pw-" + id).innerHTML = `<input type="text" id="pwv-${id}" placeholder="新密碼 6 字以上" autocomplete="off" aria-label="新密碼"><button class="btn red small" type="button" data-pwset="${id}">確定</button>`;
+    $("pwv-" + id).focus();
+    return;
+  }
+  if (b.dataset.pwset) {
+    const id = b.dataset.pwset, pw = $("pwv-" + id).value.trim();
+    if (pw.length < 6) return toast("密碼至少要 6 個字");
+    const { error } = await sb.rpc("admin_set_password", { p_user: id, p_password: pw });
+    if (error) return toast(errMsg(error));
+    $("pw-" + id).innerHTML = `<span style="color:var(--ready);font-size:13px">已重設，請私訊告訴客人新密碼</span>`;
     return;
   }
   if (b.dataset.f) { S.filter = b.dataset.f; renderStats(); renderRows(); }
