@@ -102,17 +102,24 @@ async function loadClaims() {
   $("claimNo").onclick = () => { $("claimBox").hidden = true; toast("好的，有問題可以私訊團主"); };
 }
 
+const SHIP_FEE = 39;
+let pendingIds = new Set();
+
 function itemState(it) {
   const p = it.products;
   if (it.shipped_at) return [`已安排出貨 ${md(it.shipped_at)}`, "var(--ship-ink)"];
-  if (p.status === "arrived") return ["已到貨・等待出貨", "var(--ready)"];
+  if (pendingIds.has(it.id)) return ["已申請出貨・等待團主開單", "var(--navy)"];
+  if (p.status === "arrived") return ["已到貨・可以申請出貨", "var(--ready)"];
   return [ST[p.status], "var(--wait)"];
 }
+const lineOf = (it) => `<div class="li"><div>${esc(it.products.name)} ×${it.qty}<br><em style="color:${itemState(it)[1]}">${esc(itemState(it)[0])}</em></div>
+  <div class="money">${it.products.price != null ? "$" + fmt(it.products.price * it.qty) : "價格待公布"}</div></div>`;
+const sumOf = (list) => list.reduce((s, it) => s + (it.products.price || 0) * it.qty, 0);
 
 async function loadMine() {
   const uid = (await sb.auth.getUser()).data.user?.id;
   const { data: cust, error } = await sb.from("customers")
-    .select("id, fb_name, extra_fee, note, order_items(id, qty, shipped_at, products(id, code, name, price, status, rounds(title)))")
+    .select("id, fb_name, extra_fee, note, order_items(id, qty, shipped_at, products(id, code, name, price, status, rounds(title))), ship_requests(id, item_ids, status, note, created_at, shipping_fee)")
     .eq("user_id", uid).maybeSingle();
   if (error) { $("mine").innerHTML = `<p class="err">${esc(errMsg(error))}</p>`; return; }
   const items = cust?.order_items || [];
@@ -120,29 +127,76 @@ async function loadMine() {
     $("mine").innerHTML = `<div class="card"><p class="hint" style="margin:0">目前還沒有你的喊單。<br>在社團喊單後，團主匯入就會出現在這裡；也可以直接在下面「正在收單」按 +1。</p></div>`;
     return;
   }
+  const reqs = (cust.ship_requests || []).filter((r) => r.status !== "cancelled");
+  const pending = reqs.filter((r) => r.status === "pending");
+  pendingIds = new Set(pending.flatMap((r) => r.item_ids));
+  const shipFees = reqs.reduce((s, r) => s + (r.shipping_fee || 0), 0);
+  const canShip = items.filter((i) => !i.shipped_at && i.products.status === "arrived" && !pendingIds.has(i.id));
+
   const byRound = {};
   items.forEach((it) => { const r = it.products.rounds?.title || "團購"; (byRound[r] ||= []).push(it); });
-  const goods = items.reduce((s, it) => s + (it.products.price || 0) * it.qty, 0);
+  const goods = sumOf(items);
   const unshipped = items.filter((i) => !i.shipped_at);
   const ready = unshipped.filter((i) => i.products.status === "arrived");
   const [cls, label] = !unshipped.length ? ["p-ship", "已安排出貨"]
-    : ready.length === unshipped.length ? ["p-ready", "可出貨"]
+    : pending.length ? ["p-part", "已申請出貨"]
+    : ready.length === unshipped.length ? ["p-ready", "可以出貨"]
     : ready.length ? ["p-part", "部分可出"] : ["p-wait", "等待到貨"];
+
+  const byId = Object.fromEntries(items.map((i) => [i.id, i]));
+  const pendingBox = pending.map((r) => {
+    const list = r.item_ids.map((id) => byId[id]).filter(Boolean);
+    return `<div class="card" style="margin:12px 0;border-color:var(--navy);background:var(--navy-soft)">
+      <b>已申請出貨・${md(r.created_at.slice(0, 10))}</b>
+      <p class="hint" style="margin:4px 0 6px">團主開單後就會寄出，運費統一使用全家好賣家 $${r.shipping_fee} 元出貨。</p>
+      <div style="font-size:14px">${list.map((i) => `${esc(i.products.name)} ×${i.qty}`).join("、")}</div>
+      <div class="money" style="margin-top:4px">商品 $${fmt(sumOf(list))} ＋ 運費 $${r.shipping_fee} ＝ <b>$${fmt(sumOf(list) + r.shipping_fee)}</b></div>
+      ${r.note ? `<div style="font-size:13px;color:var(--muted);margin-top:4px">你的備註：${esc(r.note)}</div>` : ""}
+      <button class="btn small" type="button" data-cancelreq="${r.id}" style="margin-top:8px">取消申請</button>
+    </div>`;
+  }).join("");
+
+  const askBox = canShip.length ? `<div class="card dashed" style="margin:12px 0;background:var(--ready-soft)" id="askBox">
+      <b>有 ${canShip.length} 項商品已到貨，可以出貨了</b>
+      <div id="askForm" hidden style="margin-top:8px">
+        ${canShip.map(lineOf).join("")}
+        <div class="li"><div>運費<br><em style="color:var(--muted)">統一使用全家好賣家 $${SHIP_FEE} 元出貨</em></div><div class="money">$${SHIP_FEE}</div></div>
+        <div class="li total"><div>這次出貨要付</div><div class="money">$${fmt(sumOf(canShip) + SHIP_FEE)}</div></div>
+        <div class="field" style="margin-top:8px">
+          <label for="shipNote">備註（選填）</label>
+          <input class="input" id="shipNote" maxlength="200" placeholder="例如：取貨門市、想等其他商品一起寄">
+        </div>
+        <button class="btn red big" type="button" id="shipConfirm">確認申請出貨</button>
+      </div>
+      <button class="btn ship big" type="button" id="shipAsk" style="margin-top:8px">我想要出貨</button>
+    </div>` : "";
+
   $("mine").innerHTML = `<div class="envelope">
     <div style="font-size:12px;color:var(--muted)">好事丞雙 團購查詢</div>
     <h3>${esc(cust.fb_name)}</h3>
     <span class="pill ${cls}" style="margin:4px 0 8px">${label}</span>
+    ${askBox}${pendingBox}
     ${Object.entries(byRound).map(([r, list]) => `
       <div style="margin-top:10px;font-family:var(--f-latin);letter-spacing:.14em;font-size:12px;color:var(--red)">${esc(r)}</div>
-      ${list.sort((a, b) => a.products.code.localeCompare(b.products.code, "zh-Hant", { numeric: true })).map((it) => {
-        const [t, c] = itemState(it);
-        return `<div class="li"><div>${esc(it.products.name)} ×${it.qty}<br><em style="color:${c}">${esc(t)}</em></div>
-          <div class="money">${it.products.price != null ? "$" + fmt(it.products.price * it.qty) : "價格待公布"}</div></div>`;
-      }).join("")}`).join("")}
-    ${cust.extra_fee ? `<div class="li"><div>運費／其他費用</div><div class="money">$${fmt(cust.extra_fee)}</div></div>` : ""}
-    <div class="li total"><div>應付金額</div><div class="money">$${fmt(goods + (cust.extra_fee || 0))}</div></div>
+      ${list.sort((a, b) => a.products.code.localeCompare(b.products.code, "zh-Hant", { numeric: true })).map(lineOf).join("")}`).join("")}
+    ${shipFees ? `<div class="li"><div>全家好賣家運費<br><em style="color:var(--muted)">$${SHIP_FEE} × ${reqs.length} 次出貨</em></div><div class="money">$${fmt(shipFees)}</div></div>` : ""}
+    ${cust.extra_fee ? `<div class="li"><div>其他費用</div><div class="money">$${fmt(cust.extra_fee)}</div></div>` : ""}
+    <div class="li total"><div>應付金額</div><div class="money">$${fmt(goods + shipFees + (cust.extra_fee || 0))}</div></div>
+    ${!shipFees ? `<p class="hint" style="margin:6px 0 0">運費：統一使用全家好賣家 $${SHIP_FEE} 元出貨，申請出貨時才會加上。</p>` : ""}
     ${cust.note ? `<p class="hint" style="margin:8px 0 0">團主備註：${esc(cust.note)}</p>` : ""}
   </div>`;
+
+  if (canShip.length) {
+    $("shipAsk").onclick = () => { $("askForm").hidden = false; $("shipAsk").hidden = true; $("shipNote").focus(); };
+    $("shipConfirm").onclick = async () => {
+      $("shipConfirm").disabled = true;
+      const { error } = await sb.rpc("request_shipping", { p_note: $("shipNote").value });
+      $("shipConfirm").disabled = false;
+      if (error) return toast(errMsg(error));
+      toast("已送出出貨申請，團主開單後就會寄出");
+      loadMine();
+    };
+  }
 }
 
 async function loadOpen() {
@@ -168,6 +222,12 @@ document.addEventListener("click", async (e) => {
   const q = (id) => $("q-" + id);
   if (b.dataset.inc) q(b.dataset.inc).textContent = Math.min(99, +q(b.dataset.inc).textContent + 1);
   if (b.dataset.dec) q(b.dataset.dec).textContent = Math.max(1, +q(b.dataset.dec).textContent - 1);
+  if (b.dataset.cancelreq) {
+    if (!confirm("確定取消這次的出貨申請？")) return;
+    const { error } = await sb.rpc("cancel_ship_request", { p_id: +b.dataset.cancelreq });
+    if (error) return toast(errMsg(error));
+    toast("已取消出貨申請"); loadMine();
+  }
   if (b.dataset.plus) {
     const id = +b.dataset.plus, qty = +q(id).textContent;
     b.disabled = true;

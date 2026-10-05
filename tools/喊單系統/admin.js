@@ -33,6 +33,7 @@ async function boot(session) {
   }
   showTab(S.tab);
   await loadRounds();
+  if (isAdmin()) { loadShips(); setInterval(loadShips, 60000); }
 }
 $("logout").onclick = async () => { await sb.auth.signOut(); location.href = "./"; };
 
@@ -83,8 +84,9 @@ async function loadRound() {
 function showTab(k) {
   S.tab = k;
   document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", t.dataset.p === k));
-  ["cust", "prod", "order", "imp", "view", "acct"].forEach((x) => { $("p-" + x).hidden = x !== k; });
+  ["ship", "cust", "prod", "order", "imp", "view", "acct"].forEach((x) => { $("p-" + x).hidden = x !== k; });
   if (k === "acct") loadAccounts();
+  if (k === "ship") loadShips();
 }
 $("tabs").onclick = (e) => { const t = e.target.closest(".tab"); if (t) { showTab(t.dataset.p); renderAll(); } };
 
@@ -149,7 +151,7 @@ function renderRows() {
       ? `<small>出貨 ${md(shipped[0].shipped_at)}</small><button class="btn small" type="button" data-undo="${c.id}">取消出貨</button>`
       : `<button class="btn ship" type="button" data-ship="${c.id}" ${canShip ? "" : "disabled"}>${s === "part" ? "先出已到貨" : "安排出貨"}</button>${shipped.length ? `<button class="btn small" type="button" data-undo="${c.id}">取消已出部分</button>` : ""}`;
     return `<div class="row ${s === "ship" ? "shipped" : ""}">
-      <div class="name">${esc(c.fb_name)}<small>${c.user_id ? "✓ 已綁定帳號" : "還沒綁定帳號"}</small></div>
+      <div class="name">${esc(c.fb_name)}<small>${c.user_id ? "✓ 已綁定帳號" : "還沒綁定帳號"}${S.pendingCust?.has(c.id) ? `・<b style="color:var(--ship-ink)">已申請出貨</b>` : ""}</small></div>
       <div class="items">${chips}</div>
       <div class="money"><div class="tot">$${fmt(g + (c.extra_fee || 0))}</div>${c.extra_fee ? `<div class="ex">商品 ${fmt(g)} + 其他 ${fmt(c.extra_fee)}</div>` : ""}</div>
       <span class="pill p-${s}">${l}</span>
@@ -300,6 +302,57 @@ function renderPreview() {
 }
 $("whoq").oninput = renderPreview;
 
+// ---------- 出貨申請 ----------
+const SHIP_FEE_TXT = "統一使用全家好賣家 $39 元出貨";
+const cp = (text) => `<button class="cp" type="button" data-cp="${esc(text)}">複製</button>`;
+async function loadShips() {
+  const { data: reqs, error } = await sb.from("ship_requests")
+    .select("*, customers(fb_name, phone, note)").in("status", ["pending", "done"])
+    .order("created_at", { ascending: true }).limit(200);
+  if (error) { $("shipList").innerHTML = `<p class="err">${esc(errMsg(error))}</p>`; return; }
+  const ids = [...new Set(reqs.flatMap((r) => r.item_ids))];
+  const { data: its } = ids.length ? await sb.from("order_items").select("id, qty, shipped_at, products(code, name, price)").in("id", ids) : { data: [] };
+  const byId = Object.fromEntries((its || []).map((i) => [i.id, i]));
+  const pending = reqs.filter((r) => r.status === "pending");
+  const done = reqs.filter((r) => r.status === "done").sort((a, b) => (b.handled_at || "").localeCompare(a.handled_at || "")).slice(0, 15);
+  S.pendingCust = new Set(pending.map((r) => r.customer_id));
+  $("shipBadge").hidden = !pending.length; $("shipBadge").textContent = pending.length;
+  document.title = (pending.length ? `(${pending.length}) ` : "") + "好事丞雙 喊單後台";
+
+  const card = (r, isDone) => {
+    const list = r.item_ids.map((id) => byId[id]).filter(Boolean);
+    const sub = list.reduce((s, i) => s + (i.products.price || 0) * i.qty, 0);
+    const name = r.customers?.fb_name || "（客人已刪除）";
+    const summary = list.map((i) => `${i.products.name} ×${i.qty} $${(i.products.price || 0) * i.qty}`).join("\n") + `\n運費 $${r.shipping_fee}\n合計 $${sub + r.shipping_fee}`;
+    return `<div class="req" style="${isDone ? "border-left-color:var(--ready);opacity:.85" : ""}">
+      <div class="req-head">
+        <span><span class="nm">${esc(name)}</span>${cp(name)}</span>
+        <span style="font-size:13px;color:var(--muted)">申請 ${md(r.created_at.slice(0, 10))} ${r.created_at.slice(11, 16)}${isDone ? `・已開單 ${md((r.handled_at || "").slice(0, 10))}` : ""}</span>
+      </div>
+      ${r.note ? `<div style="font-size:14px;margin-bottom:6px">客人備註：<b>${esc(r.note)}</b>${cp(r.note)}</div>` : ""}
+      ${r.customers?.phone ? `<div style="font-size:14px;margin-bottom:6px">手機：${esc(r.customers.phone)}${cp(r.customers.phone)}</div>` : ""}
+      <div class="tablewrap"><table>
+        <thead><tr><th>商品名稱</th><th style="text-align:right">數量</th><th style="text-align:right">單價</th><th style="text-align:right">金額</th></tr></thead>
+        <tbody>${list.map((i) => `<tr>
+          <td>${esc(i.products.name)}${cp(i.products.name)}</td>
+          <td class="n">${i.qty}${cp(String(i.qty))}</td>
+          <td class="n">${i.products.price != null ? "$" + fmt(i.products.price) + cp(String(i.products.price)) : "待定"}</td>
+          <td class="n">$${fmt((i.products.price || 0) * i.qty)}${cp(String((i.products.price || 0) * i.qty))}</td></tr>`).join("")}
+          <tr><td colspan="3" style="color:var(--muted)">運費（${SHIP_FEE_TXT}）</td><td class="n">$${r.shipping_fee}</td></tr>
+          <tr><td colspan="3"><b>合計</b></td><td class="n"><b>$${fmt(sub + r.shipping_fee)}</b>${cp(String(sub + r.shipping_fee))}</td></tr>
+        </tbody></table></div>
+      <div class="req-foot">
+        <button class="btn small" type="button" data-cp="${esc(summary)}">複製整筆明細</button>
+        ${isDone ? `<button class="btn small" type="button" data-reopen="${r.id}">改回未處理</button>` : `<button class="btn ship" type="button" data-done="${r.id}">已開單，標記出貨</button>`}
+      </div>
+    </div>`;
+  };
+  $("shipList").innerHTML = pending.length ? pending.map((r) => card(r, false)).join("") : `<div class="card"><p class="hint" style="margin:0">目前沒有待處理的出貨申請。</p></div>`;
+  $("shipDone").innerHTML = done.length ? done.map((r) => card(r, true)).join("") : `<p class="hint">還沒有處理過的申請。</p>`;
+  S.shipReqs = reqs;
+  if (S.tab === "cust") renderRows();
+}
+
 // ---------- 帳號 ----------
 async function loadAccounts() {
   const { data, error } = await sb.from("profiles").select("*").order("created_at", { ascending: false });
@@ -314,6 +367,28 @@ async function loadAccounts() {
 // ---------- 事件 ----------
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.cp !== undefined) {
+    try { await navigator.clipboard.writeText(b.dataset.cp); toast("已複製"); }
+    catch { toast("複製失敗，請手動選取文字"); }
+    return;
+  }
+  if (b.dataset.done) {
+    const r = S.shipReqs.find((x) => x.id === +b.dataset.done);
+    b.disabled = true;
+    const a = await sb.from("order_items").update({ shipped_at: GB.today() }).in("id", r.item_ids).is("shipped_at", null);
+    if (a.error) { b.disabled = false; return toast(errMsg(a.error)); }
+    const c = await sb.from("ship_requests").update({ status: "done", handled_at: new Date().toISOString() }).eq("id", r.id);
+    if (c.error) { b.disabled = false; return toast(errMsg(c.error)); }
+    toast(`${r.customers?.fb_name || ""} 已標記出貨`); loadShips(); if (S.rid) loadRound();
+    return;
+  }
+  if (b.dataset.reopen) {
+    const r = S.shipReqs.find((x) => x.id === +b.dataset.reopen);
+    await sb.from("order_items").update({ shipped_at: null }).in("id", r.item_ids);
+    await sb.from("ship_requests").update({ status: "pending", handled_at: null }).eq("id", r.id);
+    toast("已改回未處理"); loadShips(); if (S.rid) loadRound();
+    return;
+  }
   if (b.dataset.f) { S.filter = b.dataset.f; renderStats(); renderRows(); }
   if (b.dataset.who) { S.viewId = +b.dataset.who; renderPreview(); }
   if (b.dataset.ship) {

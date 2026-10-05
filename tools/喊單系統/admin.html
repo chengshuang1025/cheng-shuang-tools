@@ -41,6 +41,16 @@
 .roundbar select{font-family:var(--f-head);font-size:16px;padding:5px 10px;border-width:2px}
 .addform{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:12px}
 .addform .field{margin:0}
+.badge{display:inline-block;min-width:20px;height:20px;line-height:20px;border-radius:10px;background:var(--mustard);color:var(--navy);font-family:var(--f-latin);font-size:12px;font-weight:600;text-align:center;padding:0 6px;margin-left:6px;vertical-align:2px}
+.tab[aria-selected="true"] .badge{background:var(--paper);color:var(--red)}
+.req{background:var(--paper);border:2px solid var(--navy);border-left:8px solid var(--ship);border-radius:4px;padding:14px 16px;margin-bottom:12px}
+.req-head{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;justify-content:space-between;margin-bottom:8px}
+.req-head .nm{font-family:var(--f-head);font-size:18px}
+.req table{border-width:1.5px;margin:6px 0}
+.req th{font-size:13px;padding:6px 10px}.req td{padding:6px 10px}
+.cp{border:1px solid var(--soft-line);background:#fffdf7;border-radius:3px;font-size:12px;padding:1px 7px;margin-left:6px;color:var(--navy)}
+.cp:hover{border-color:var(--navy)}
+.req-foot{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-top:8px}
 .addform .input{padding:5px 8px;width:auto}
 .roundbar .addform{flex-wrap:nowrap}
 </style>
@@ -101,6 +111,7 @@
     </div>
 
     <nav class="tabs" role="tablist" id="tabs">
+      <button class="tab" role="tab" data-p="ship" aria-selected="false" type="button">出貨申請<span class="badge" id="shipBadge" hidden></span></button>
       <button class="tab" role="tab" data-p="cust" aria-selected="true" type="button">客人總覽</button>
       <button class="tab" role="tab" data-p="prod" aria-selected="false" type="button">商品</button>
       <button class="tab" role="tab" data-p="order" aria-selected="false" type="button">訂貨</button>
@@ -108,6 +119,12 @@
       <button class="tab" role="tab" data-p="view" aria-selected="false" type="button">客人看到的畫面</button>
       <button class="tab" role="tab" data-p="acct" aria-selected="false" type="button">帳號</button>
     </nav>
+
+    <section id="p-ship" hidden>
+      <p class="hint">客人在查詢頁按「我想要出貨」後會出現在這裡（不分團）。到全家好賣+ 開單時，按每一格旁的「複製」貼上就好；開完單按「已開單，標記出貨」。</p>
+      <div id="shipList"><p class="loading">讀取中…</p></div>
+      <details style="margin-top:18px"><summary style="cursor:pointer;font-size:14px">最近處理過的申請</summary><div id="shipDone" style="margin-top:10px"></div></details>
+    </section>
 
     <section id="p-cust">
       <div class="stats" id="stats"></div>
