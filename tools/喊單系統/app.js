@@ -18,12 +18,13 @@ function setMode(m) {
   $("mLogin").setAttribute("aria-pressed", m === "login");
   $("mSignup").setAttribute("aria-pressed", m === "signup");
   $("nameField").hidden = m !== "signup";
-  $("phoneBtn").textContent = m === "login" ? "登入" : "建立帳號";
+  $("phoneBtn").textContent = m === "login" ? "登入" : "註冊並登入";
   $("pw").autocomplete = m === "login" ? "current-password" : "new-password";
   $("pwHint").textContent = m === "login" ? "忘記密碼請私訊團主幫你重設" : "至少 6 個字，請記下來";
   $("phoneErr").hidden = true;
 }
 $("mLogin").onclick = () => setMode("login");
+$("showAdminFb").onclick = (e) => { e.preventDefault(); $("adminFb").hidden = false; $("adminFb").scrollIntoView({ behavior: "smooth" }); };
 $("mSignup").onclick = () => setMode("signup");
 
 $("phoneForm").onsubmit = async (e) => {

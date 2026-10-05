@@ -27,16 +27,11 @@
   <!-- 尚未登入 -->
   <section id="v-login" hidden>
     <div class="card dashed">
-      <h3>登入查詢你的喊單</h3>
-      <p class="hint">登入後可以看到你在社團喊的單、哪些商品到貨了、什麼時候出貨，也能直接 +1。</p>
-      <button class="btn fb" id="fbLogin" type="button">
-        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M24 12.07C24 5.4 18.63 0 12 0S0 5.4 0 12.07C0 18.1 4.39 23.1 10.13 24v-8.44H7.08v-3.49h3.05V9.41c0-3.02 1.79-4.69 4.53-4.69 1.31 0 2.68.24 2.68.24v2.97h-1.51c-1.49 0-1.95.93-1.95 1.88v2.26h3.33l-.53 3.49h-2.8V24C19.61 23.1 24 18.1 24 12.07z"/></svg>
-        用 Facebook 登入
-      </button>
-      <div class="or">或用手機號碼</div>
-      <div class="filters" style="display:flex;gap:6px;margin-bottom:12px" role="tablist">
-        <button class="chipbtn" id="mLogin" aria-pressed="true" type="button">登入</button>
-        <button class="chipbtn" id="mSignup" aria-pressed="false" type="button">第一次使用</button>
+      <h3>輸入手機登入並註冊</h3>
+      <p class="hint">用手機號碼登入，就能看到你在社團喊的單、哪些商品到貨了、什麼時候出貨，也能直接 +1。第一次來的話，請先按「第一次使用・註冊」。</p>
+      <div class="seg" role="tablist">
+        <button class="segbtn" id="mSignup" aria-pressed="false" type="button">第一次使用・註冊</button>
+        <button class="segbtn" id="mLogin" aria-pressed="true" type="button">已經註冊・登入</button>
       </div>
       <form id="phoneForm" novalidate>
         <div class="err" id="phoneErr" hidden></div>
@@ -56,6 +51,13 @@
         </div>
         <button class="btn primary big" id="phoneBtn" type="submit">登入</button>
       </form>
+      <div id="adminFb" hidden style="margin-top:18px;border-top:1.5px dashed var(--soft-line);padding-top:14px">
+        <p class="hint" style="margin-bottom:8px">團主專用</p>
+        <button class="btn fb" id="fbLogin" type="button">
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M24 12.07C24 5.4 18.63 0 12 0S0 5.4 0 12.07C0 18.1 4.39 23.1 10.13 24v-8.44H7.08v-3.49h3.05V9.41c0-3.02 1.79-4.69 4.53-4.69 1.31 0 2.68.24 2.68.24v2.97h-1.51c-1.49 0-1.95.93-1.95 1.88v2.26h3.33l-.53 3.49h-2.8V24C19.61 23.1 24 18.1 24 12.07z"/></svg>
+          用 Facebook 登入
+        </button>
+      </div>
     </div>
   </section>
 
@@ -84,7 +86,7 @@
   </section>
 
   <footer>
-    好事丞雙 x 用插畫玩手作 ・ <a href="privacy.html">隱私權政策</a> ・ <a href="delete-data.html">刪除我的資料</a>
+    好事丞雙 x 用插畫玩手作 ・ <a href="privacy.html">隱私權政策</a> ・ <a href="delete-data.html">刪除我的資料</a> ・ <a href="#" id="showAdminFb">團主登入</a>
   </footer>
 </div>
 
