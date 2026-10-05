@@ -180,6 +180,18 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+// FB 登入失敗時，網址會帶回錯誤原因：顯示出來並清掉網址
+(() => {
+  const qs = new URLSearchParams(location.search + "&" + location.hash.slice(1));
+  const err = qs.get("error_description");
+  if (!err) return;
+  const msg = /exchange external code/i.test(err) ? "Facebook 登入沒有成功（系統設定問題），請稍後再試或私訊團主"
+    : /email/i.test(err) ? "Facebook 沒有提供 Email，請改用手機號碼登入，或私訊團主"
+    : "登入沒有成功：" + err;
+  $("phoneErr").textContent = msg; $("phoneErr").hidden = false;
+  history.replaceState(null, "", location.pathname);
+})();
+
 let shownFor;
 sb.auth.onAuthStateChange((_ev, session) => {
   const key = session?.user?.id || "none";
