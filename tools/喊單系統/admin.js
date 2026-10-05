@@ -35,7 +35,19 @@ async function boot(session) {
   await loadRounds();
   if (isAdmin()) { loadShips(); loadAccounts(); setInterval(() => { loadShips(); loadAccounts(); }, 60000); }
 }
-$("logout").onclick = async () => { await sb.auth.signOut(); location.href = "./"; };
+$("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+// 後台登入：團主用 FB，夥伴用手機
+$("fbLogin").onclick = async () => {
+  const { error } = await sb.auth.signInWithOAuth({ provider: "facebook", options: { redirectTo: location.origin + location.pathname } });
+  if (error) toast(errMsg(error));
+};
+$("phoneForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const phone = GB.normPhone($("ph").value), pw = $("pw").value;
+  const { error } = await sb.auth.signInWithPassword({ email: GB.phoneEmail(phone), password: pw });
+  if (error) { $("phoneErr").textContent = errMsg(error); $("phoneErr").hidden = false; return; }
+  location.reload();
+};
 
 // ---------- 團 ----------
 async function loadRounds(selectId) {

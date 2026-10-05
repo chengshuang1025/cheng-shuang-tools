@@ -5,7 +5,7 @@ let mode = "login";
 let me = null;
 
 // ---------- 登入 ----------
-$("fbLogin").onclick = async () => {
+if ($("fbLogin")) $("fbLogin").onclick = async () => {
   const { error } = await sb.auth.signInWithOAuth({
     provider: "facebook",
     options: { redirectTo: location.origin + location.pathname },
@@ -24,7 +24,6 @@ function setMode(m) {
   $("phoneErr").hidden = true;
 }
 $("mLogin").onclick = () => setMode("login");
-$("showAdminFb").onclick = (e) => { e.preventDefault(); $("adminFb").hidden = false; $("adminFb").scrollIntoView({ behavior: "smooth" }); };
 $("mSignup").onclick = () => setMode("signup");
 
 $("phoneForm").onsubmit = async (e) => {
