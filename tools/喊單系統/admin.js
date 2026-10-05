@@ -9,10 +9,12 @@ const sortCode = (a, b) => String(a.code).localeCompare(String(b.code), "zh-Hant
 
 // ---------- 啟動 ----------
 let started = false;
-sb.auth.onAuthStateChange((_e, session) => {
-  if (started && session) return;
-  started = true;
-  setTimeout(() => boot(session), 0);
+sb.auth.onAuthStateChange((ev, session) => {
+  if (!started) { started = true; setTimeout(() => boot(session), 0); return; }
+  // 同一個瀏覽器在別的分頁登出、或換成別的帳號登入時，所有分頁的登入狀態都會一起換掉
+  // 後台偵測到「已經不是剛剛那個人」就重新整理，避免用錯的身分繼續讀資料
+  const uid = session?.user?.id || null;
+  if (ev === "SIGNED_OUT" || uid !== S.uid) location.reload();
 });
 
 async function boot(session) {

@@ -30,6 +30,7 @@ window.GB = {
     if (/already registered|already been registered/i.test(m)) return "這個手機號碼已經註冊過了，請直接登入";
     if (/Password should be at least/i.test(m)) return "密碼至少要 6 個字";
     if (/rate limit/i.test(m)) return "嘗試太多次了，請稍等一下再試";
+    if (/permission denied|JWT expired|not authenticated/i.test(m)) return "登入狀態已改變，請重新整理頁面";
     return m.replace(/^.*?ERROR:\s*/, "");
   },
   ST: { open: "收單中", closed: "已結單・未到貨", arrived: "已到貨" },
