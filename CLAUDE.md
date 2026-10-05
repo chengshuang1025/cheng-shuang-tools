@@ -1,18 +1,20 @@
 # cheng-shuang-tools — 我的工具總專案
 
 ## 對話開始時請先讀
-進度與最近更動都在 Obsidian：`secondbrain/cheng-shuang-tools/工作筆記.md`
+進度與最近更動都在 Obsidian：`cheng-shuang-tools/工作筆記.md`（Obsidian MCP 的路徑，不含 vault 名稱）
 
 ## 工作模式
 - **加新工具**：對 Claude 說「我想做一個 XXX 工具」→ Claude 會建 `tools/<工具名>/` 子資料夾
 - **結束工作**：對 Claude 說「**收工**」→ 自動 commit + push + 更新 Obsidian 工作筆記
+- **每個工具都要收工紀錄**：不論做的是哪個工具，每次工作告一段落，Claude 都要主動收工（commit、push、更新 Obsidian 工作筆記的「上次做到哪」「工具清單」「最近更動紀錄」「踩坑筆記」），不用等她開口
+- Obsidian 的 patch 功能目前會出錯，更新工作筆記請先讀整份再用整份覆寫
 - **接續工作**：對 Claude 說「**開工**」或「讀工作筆記、告訴我上次做到哪」
 
 ## 工作桌 + 三個家
 - 📋 GDrive 工作桌：`G:\我的雲端硬碟\cheng-shuang-tools\`（自動跨電腦同步）
 - 🐙 GitHub repo：chengshuang1025/cheng-shuang-tools（公開，網頁的家）
 - 📘 Obsidian 駕駛艙：`secondbrain/cheng-shuang-tools/工作筆記.md`（想法的家）
-- 🐘 Supabase 專案：ig-reels-kb（資料的家，用 Supabase MCP 直接查/寫）
+- 🐘 Supabase 專案：ig-reels-kb（資料的家，用 Supabase MCP 直接查/寫）；喊單系統另用 group-buy 專案（MCP 沒有權限，要透過瀏覽器的 SQL Editor）
 
 ## 工具清單
 （之後加新工具時會自動更新）
@@ -22,5 +24,5 @@
 
 ## 工作注意事項
 - commit 訊息要寫清楚做了什麼 + 為什麼
-- 收工前說「收工」讓 Claude 同步三方
+- 收工時同步三方（GitHub、Obsidian；GDrive 工作桌在舊 Windows 電腦上，換到 Mac 後先標「—」）
 - 敏感資料（API key、密碼）一律放 `.env`，不寫進程式碼或 commit
