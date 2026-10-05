@@ -248,9 +248,23 @@ function renderOrder() {
 // ---------- 匯入社團留言 ----------
 const RE = /([A-Za-z0-9一-鿿]+?)\s*[+＋]\s*(\d+)/g;
 const NOISE = /^(\d+\s*(秒|分鐘|小時|天|週|年).*|讚|回覆|分享|已編輯|查看翻譯|作者|頂尖粉絲|.*·\s*(讚|回覆).*|\d+)$/;
+// 商品名稱比對時忽略前面的編號，例如「2.水蜜桃乾」→「水蜜桃乾」
+const bare = (n) => String(n).toLowerCase().replace(/^\s*\d+\s*[.、．:：)\]）-]?\s*/, "").replace(/\s+/g, "");
+// 回傳 { p } 找到唯一商品；{ many: [...] } 有好幾個符合；{} 找不到
 function findP(tok) {
-  tok = tok.trim().toLowerCase();
-  return S.products.find((p) => String(p.code).toLowerCase() === tok) || S.products.find((p) => p.name.toLowerCase().includes(tok) || tok.includes(p.name.toLowerCase()));
+  tok = tok.trim().toLowerCase().replace(/\s+/g, "");
+  const byCode = S.products.find((p) => String(p.code).toLowerCase() === tok);
+  if (byCode) return { p: byCode };
+  const exact = S.products.filter((p) => bare(p.name) === tok);
+  if (exact.length === 1) return { p: exact[0] };
+  // 留言裡包含完整商品名，例如「我要水蜜桃乾」：取名稱最長的那個
+  const inside = S.products.filter((p) => bare(p.name) && tok.includes(bare(p.name))).sort((a, b) => bare(b.name).length - bare(a.name).length);
+  if (inside.length && (inside.length === 1 || bare(inside[0].name).length > bare(inside[1].name).length)) return { p: inside[0] };
+  // 只打了部分名稱，例如「桃乾」：只有唯一一個商品符合才算
+  const part = tok.length >= 2 ? S.products.filter((p) => bare(p.name).includes(tok)) : [];
+  if (part.length === 1) return { p: part[0] };
+  if (part.length > 1) return { many: part };
+  return {};
 }
 $("parse").onclick = () => {
   if (!S.products.length) return toast("這一團還沒有商品，請先到「商品」分頁加入");
@@ -260,7 +274,12 @@ $("parse").onclick = () => {
     const m = [...L.matchAll(RE)];
     if (m.length) {
       if (!cur) { bad.push(`找不到留言者：「${L}」`); continue; }
-      for (const x of m) { const p = findP(x[1]); p ? ok.push({ name: cur, pid: p.id, q: +x[2] }) : bad.push(`${cur}：「${x[0]}」對不到商品代碼`); }
+      for (const x of m) {
+        const f = findP(x[1]);
+        if (f.p) ok.push({ name: cur, pid: f.p.id, q: +x[2] });
+        else if (f.many) bad.push(`${cur}：「${x[0]}」有好幾個商品符合（${f.many.map((p) => p.name).join("、")}），請手動確認`);
+        else bad.push(`${cur}：「${x[0]}」對不到商品代碼或名稱`);
+      }
       used = true;
     } else if (cur && !used) { bad.push(`${cur}：「${L}」沒有 +數量，請手動確認`); cur = null; }
     else { cur = L; used = false; }
