@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="icon-1024.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Huninn&family=Noto+Sans+TC:wght@400;500;700&family=Oswald:wght@500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=20261005d">
+<link rel="stylesheet" href="style.css?v=20261005e">
 <style>
 .list{display:flex;flex-direction:column;gap:10px}
 .row{display:grid;grid-template-columns:150px minmax(0,1fr) 170px 112px 132px;gap:12px;align-items:center;background:var(--paper);border:1.5px solid var(--navy);border-left:6px solid var(--navy);border-radius:4px;padding:12px 16px}
@@ -88,9 +88,8 @@
   </header></div>
 
   <section id="v-login" hidden>
-    <div class="card dashed" style="max-width:520px">
-      <h3>後台登入</h3>
-      <p class="hint">團主用 Facebook 登入；協助訂貨的夥伴用手機號碼登入。</p>
+    <div class="card dashed" style="max-width:520px;margin:24px auto 0">
+      <h3 style="text-align:center;margin-bottom:14px">後台登入</h3>
       <button class="btn fb" id="fbLogin" type="button">
         <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M24 12.07C24 5.4 18.63 0 12 0S0 5.4 0 12.07C0 18.1 4.39 23.1 10.13 24v-8.44H7.08v-3.49h3.05V9.41c0-3.02 1.79-4.69 4.53-4.69 1.31 0 2.68.24 2.68.24v2.97h-1.51c-1.49 0-1.95.93-1.95 1.88v2.26h3.33l-.53 3.49h-2.8V24C19.61 23.1 24 18.1 24 12.07z"/></svg>
         團主用 Facebook 登入
@@ -106,7 +105,7 @@
   </section>
 
   <section id="v-noperm" hidden>
-    <div class="card dashed" style="max-width:560px">
+    <div class="card dashed" style="max-width:560px;margin:24px auto 0">
       <h3>這是團主專用的頁面</h3>
       <p class="hint">你的帳號沒有後台權限。要查詢自己的喊單，請回到團購查詢頁。如果你是協助訂貨的夥伴，請團主在後台把你設成「夥伴」。</p>
       <a class="btn primary" href="./">回團購查詢</a>
@@ -224,7 +223,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=20261005d"></script>
-<script src="admin.js?v=20261005d"></script>
+<script src="config.js?v=20261005e"></script>
+<script src="admin.js?v=20261005e"></script>
 </body>
 </html>
