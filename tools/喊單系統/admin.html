@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>好事丞雙 喊單後台</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Huninn&family=Noto+Sans+TC:wght@400;500;700&family=Oswald:wght@500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+.list{display:flex;flex-direction:column;gap:10px}
+.row{display:grid;grid-template-columns:150px minmax(0,1fr) 170px 112px 132px;gap:12px;align-items:center;background:var(--paper);border:1.5px solid var(--navy);border-left:6px solid var(--navy);border-radius:4px;padding:12px 16px}
+.row.shipped{background:var(--ship-soft);border-color:var(--ship);border-left-color:var(--ship)}
+.row .name{font-family:var(--f-head);font-size:16px;min-width:0;overflow-wrap:anywhere}
+.row .name small{display:block;font-family:var(--f-body);font-size:11.5px;color:var(--muted)}
+.items{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
+.row .money{text-align:right;font-size:13px}
+.row .money .tot{font-size:19px;font-weight:600}
+.row .money .ex{color:var(--muted)}
+.act{display:flex;flex-direction:column;gap:5px}
+.act small{font-family:var(--f-latin);font-size:12px;color:var(--ship-ink);text-align:center;letter-spacing:.06em}
+.more{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:13px;border-top:1px dashed var(--soft-line);padding-top:8px}
+.more input{border:1.5px solid var(--soft-line);border-radius:3px;background:#fffdf7;padding:2px 8px;font-size:13px}
+.more .ef{width:80px;font-family:var(--f-latin)}
+.more .ph{width:120px}
+.more .nt{flex:1;min-width:160px}
+.head{display:grid;grid-template-columns:150px minmax(0,1fr) 170px 112px 132px;gap:12px;padding:0 16px 0 22px;font-size:12px;color:var(--muted);letter-spacing:.08em}
+@media (max-width:860px){
+  .row{grid-template-columns:1fr auto;grid-template-areas:"n p" "i i" "m a" "x x"}
+  .row .name{grid-area:n}.row .items{grid-area:i}.row .money{grid-area:m;text-align:left}.row .pill{grid-area:p;justify-self:end}.row .act{grid-area:a}.row .more{grid-area:x}
+  .head{display:none}
+}
+.tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px}
+.filters{display:flex;flex-wrap:wrap;gap:7px}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
+@media (max-width:820px){.two{grid-template-columns:1fr}}
+.res{background:var(--paper);border:2px dashed var(--navy);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.res .ok{display:flex;justify-content:space-between;gap:8px;font-size:14px;border-bottom:1px dashed var(--soft-line);padding:3px 0}
+.roundbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px}
+.roundbar select{font-family:var(--f-head);font-size:16px;padding:5px 10px;border-width:2px}
+.addform{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:12px}
+.addform .field{margin:0}
+.addform .input{padding:5px 8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stampwrap"><header class="top">
+    <div class="chev" aria-hidden="true"></div>
+    <div class="topin">
+      <svg class="postmark" viewBox="0 0 110 110" width="92" height="92" aria-hidden="true">
+        <circle cx="55" cy="55" r="48" fill="none" stroke="#C23B27" stroke-width="3"/>
+        <circle cx="55" cy="55" r="38" fill="none" stroke="#C23B27" stroke-width="1.5"/>
+        <text x="55" y="50" text-anchor="middle" font-family="Oswald,Arial Narrow,sans-serif" font-size="15" font-weight="600" fill="#C23B27" letter-spacing="2">GROUP BUY</text>
+        <text x="55" y="70" text-anchor="middle" font-family="Oswald,Arial Narrow,sans-serif" font-size="13" fill="#C23B27" letter-spacing="1">+1 POST</text>
+      </svg>
+      <div class="brand">
+        <div class="mark" aria-hidden="true">丞</div>
+        <div><div class="eyebrow">RETRO POST ・ <span>好事丞雙 x 用插畫玩手作</span></div><h1>團購喊單後台<span class="plus">+1</span></h1></div>
+      </div>
+      <div class="who" id="whoBox" hidden>
+        <span><b id="meName"></b>・<span id="meRole"></span></span>
+        <a class="btn small" href="./">客人頁</a>
+        <button class="btn small" id="logout" type="button">登出</button>
+      </div>
+    </div>
+    <div class="chev bottom" aria-hidden="true"></div>
+  </header></div>
+
+  <section id="v-login" hidden>
+    <div class="card dashed" style="max-width:520px">
+      <h3>請先登入</h3>
+      <p class="hint">用你的 FB 或手機帳號登入。後台只開放團主和夥伴帳號。</p>
+      <a class="btn primary" href="./">前往登入</a>
+    </div>
+  </section>
+
+  <section id="v-noperm" hidden>
+    <div class="card dashed" style="max-width:560px">
+      <h3>這個帳號還沒有後台權限</h3>
+      <p class="hint">請團主在後台「帳號」分頁把你設成「夥伴」。如果你是團主本人第一次登入，請把下面這串帳號編號給 Claude 設定成管理者：</p>
+      <p><span class="code" id="myUid" style="font-size:13px;user-select:all"></span></p>
+    </div>
+  </section>
+
+  <section id="v-app" hidden>
+    <div class="roundbar">
+      <label for="roundSel" style="font-family:var(--f-latin);letter-spacing:.14em;font-size:12px;color:var(--muted)">ROUND</label>
+      <select id="roundSel"></select>
+      <span id="roundAdmin">
+        <button class="btn small" id="newRoundBtn" type="button">＋ 開新團</button>
+      </span>
+      <form id="newRoundForm" class="addform" hidden style="margin:0">
+        <input class="input" id="nrTitle" placeholder="團名，例如：10 月團購" style="width:180px" required>
+        <input class="input" id="nrClose" type="date" title="收單日（可不填）">
+        <button class="btn primary small" type="submit">建立</button>
+        <button class="btn small" type="button" id="nrCancel">取消</button>
+      </form>
+    </div>
+
+    <nav class="tabs" role="tablist" id="tabs">
+      <button class="tab" role="tab" data-p="cust" aria-selected="true" type="button">客人總覽</button>
+      <button class="tab" role="tab" data-p="prod" aria-selected="false" type="button">商品</button>
+      <button class="tab" role="tab" data-p="order" aria-selected="false" type="button">訂貨</button>
+      <button class="tab" role="tab" data-p="imp" aria-selected="false" type="button">匯入社團留言</button>
+      <button class="tab" role="tab" data-p="view" aria-selected="false" type="button">客人看到的畫面</button>
+      <button class="tab" role="tab" data-p="acct" aria-selected="false" type="button">帳號</button>
+    </nav>
+
+    <section id="p-cust">
+      <div class="stats" id="stats"></div>
+      <div class="tools"><div class="filters" id="filters"></div>
+        <input id="custq" class="searchin" type="search" placeholder="搜尋客人名字" aria-label="搜尋客人" autocomplete="off"></div>
+      <div class="head"><span>客人</span><span>喊單內容（綠＝已到貨・灰＝未到・橘刪除線＝已出）</span><span style="text-align:right">金額</span><span>狀態</span><span>出貨</span></div>
+      <div id="rows" class="list"><p class="loading">讀取中…</p></div>
+    </section>
+
+    <section id="p-prod" hidden>
+      <p class="hint">「喊單代碼」就是客人在社團留言用的，例如 A+1。改「狀態」成已到貨，客人總覽和客人頁會馬上更新。</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>代碼</th><th>商品</th><th style="text-align:right">單價</th><th style="text-align:right">總 +1</th><th style="text-align:right">已出貨</th><th>狀態</th><th>備註</th><th></th></tr></thead>
+        <tbody id="prows"></tbody>
+      </table></div>
+      <div id="prodAdd">
+        <form class="addform" id="addProd">
+          <div class="field"><label for="apCode">代碼</label><input class="input" id="apCode" style="width:70px" required></div>
+          <div class="field"><label for="apName">商品名稱</label><input class="input" id="apName" style="width:200px" required></div>
+          <div class="field"><label for="apPrice">單價</label><input class="input" id="apPrice" type="number" min="0" style="width:100px" placeholder="可先空著"></div>
+          <button class="btn primary" type="submit">加入商品</button>
+        </form>
+        <details style="margin-top:14px">
+          <summary style="cursor:pointer;font-size:14px">從 Excel／試算表一次貼上多個商品</summary>
+          <p class="hint" style="margin-top:8px">每行一個商品，依序是「代碼、名稱、單價」，從試算表複製三欄直接貼上就可以。</p>
+          <textarea id="bulkProd" rows="5" style="max-width:520px" placeholder="A	彩虹派對	310&#10;B	海洋世界	310"></textarea>
+          <div><button class="btn primary small" id="bulkProdBtn" type="button" style="margin-top:6px">全部加入</button></div>
+        </details>
+      </div>
+    </section>
+
+    <section id="p-order" hidden>
+      <div class="stats" id="ostats"></div>
+      <p class="hint">「需要數量」是客人 +1 的總和，會跟著喊單自動更新。向廠商下單後填「已訂數量」，系統算出還要訂多少。</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>代碼</th><th>商品</th><th style="text-align:right">需要數量</th><th style="text-align:right">已訂數量</th><th style="text-align:right">還要訂</th><th>訂貨狀態</th><th>備註</th></tr></thead>
+        <tbody id="orows"></tbody>
+      </table></div>
+    </section>
+
+    <section id="p-imp" hidden>
+      <p class="hint">在社團貼文底下把留言全選複製，貼到左邊。系統會找出「代碼或商品名＋數量」，例如「A+1」「彩光疊色+2」，格式不對的另外列出讓你確認，不會亂算。</p>
+      <div class="two">
+        <div>
+          <textarea id="paste" rows="12" aria-label="貼上社團留言" placeholder="陳小美&#10;A+1&#10;王大明&#10;彩光疊色+2"></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+            <button class="btn primary" id="parse" type="button">辨識留言</button>
+            <button class="btn red" id="addImp" type="button" disabled>加入喊單</button>
+          </div>
+        </div>
+        <div class="res" id="result"><span style="color:var(--muted);font-size:14px">按「辨識留言」後，結果會出現在這裡。</span></div>
+      </div>
+    </section>
+
+    <section id="p-view" hidden>
+      <p class="hint">輸入名字，預覽這位客人登入後看到的畫面（只有你看得到這個分頁）。</p>
+      <div style="max-width:420px;margin:0 auto 14px">
+        <input id="whoq" class="searchin" style="max-width:none" type="search" placeholder="輸入客人名字" aria-label="搜尋客人" autocomplete="off">
+        <div id="whores" class="filters" style="margin-top:8px"></div>
+      </div>
+      <div id="preview" style="max-width:420px;margin:0 auto"></div>
+    </section>
+
+    <section id="p-acct" hidden>
+      <p class="hint">所有登入過的帳號都在這裡。把夥伴的帳號設成「夥伴」，他就能看商品和訂貨，但看不到客人資料。</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>名字</th><th>手機</th><th>登入方式</th><th>身分</th><th>建立日期</th></tr></thead>
+        <tbody id="arows"></tbody>
+      </table></div>
+    </section>
+  </section>
+
+  <footer><a href="privacy.html">隱私權政策</a> ・ <a href="delete-data.html">刪除資料說明</a></footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>

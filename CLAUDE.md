@@ -17,6 +17,7 @@
 ## 工具清單
 （之後加新工具時會自動更新）
 - `tools/團購連結頁`：正式團購網站（自我介紹＋團購清單），網址 https://chengshuang1025.github.io/cheng-shuang-tools/ ，push 後由 GitHub Actions 自動上線。改 `data.js` 上/下架團購、改 `profile.js` 改自我介紹；截止日到會自動移到「已結束」。只放團購，跟品牌教材 Link-in-bio（cheng-shuang repo）分開
+- `tools/喊單系統`：FB 社團團購的 +1 喊單／到貨／出貨查詢系統，網址 https://chengshuang1025.github.io/cheng-shuang-tools/order/ （後台 admin.html）。資料在 Supabase 專案 group-buy（不是 ig-reels-kb），FB 登入用 Meta App「好事丞雙團購」。跟團購網站同一個 Actions 發布，每日排程順便喚醒資料庫。細節見該資料夾 README
 - `tools/腳本產生器`：輸入主題一次拿到 3 支不同開頭/結構的腳本骨架，規則依據 `RULES.md`（IG Reels 知識庫數據）。有 Windows 排程「cheng-shuang-tools-腳本產生器-每日推薦」每天 7:00 自動讀取進行中團購、產生 2 支腳本寫進當天 Obsidian 每日筆記
 
 ## 工作注意事項

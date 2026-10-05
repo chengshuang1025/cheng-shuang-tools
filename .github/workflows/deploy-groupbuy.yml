@@ -1,4 +1,5 @@
-# 團購網站自動上線：tools/團購連結頁 有改動並 push 到 main，就自動發布到 GitHub Pages
+# 團購網站自動上線：tools/團購連結頁 或 tools/喊單系統 有改動並 push，就自動發布到 GitHub Pages
+# 喊單系統放在網站的 /order/ 底下；每天的排程也會順便「戳一下」喊單資料庫，避免 Supabase 免費方案閒置被暫停
 name: 發布團購網站
 
 on:
@@ -6,6 +7,7 @@ on:
     branches: [master]
     paths:
       - "tools/團購連結頁/**"
+      - "tools/喊單系統/**"
       - ".github/workflows/deploy-groupbuy.yml"
   schedule:
     # 每天台灣時間 00:05 重新發布一次（讓分享預覽等快取保持最新；日期切換本身在瀏覽器端即時判斷）
@@ -28,12 +30,20 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: 喚醒喊單資料庫（每天一次）
+        continue-on-error: true
+        run: |
+          curl -fsS "https://swfpfnvnydekyuwcagdy.supabase.co/rest/v1/heartbeat?select=at" \
+            -H "apikey: sb_publishable_1dorLitRmxPW2mXqOURLqA_-881MPuO" && echo " 喊單資料庫已喚醒"
       - uses: actions/checkout@v4
       - name: 準備網站檔案
         run: |
           mkdir -p _site
           cp -r "tools/團購連結頁/." _site/
           rm -f _site/README.md
+          mkdir -p _site/order
+          cp -r "tools/喊單系統/." _site/order/
+          rm -rf _site/order/sql _site/order/README.md
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
