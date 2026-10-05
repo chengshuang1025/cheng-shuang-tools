@@ -201,10 +201,12 @@ async function loadMine() {
 
 async function loadOpen() {
   const { data, error } = await sb.from("products")
-    .select("id, code, name, price, note, rounds(title, close_date)")
+    .select("id, round_id, code, name, price, note, rounds(title, close_date)")
     .eq("status", "open").order("round_id").order("code");
   if (error) { $("openProds").innerHTML = `<p class="err">${esc(errMsg(error))}</p>`; return; }
   if (!data.length) { $("openProds").innerHTML = `<p class="hint">目前沒有正在收單的商品，開團時會出現在這裡。</p>`; return; }
+  // 依喊單代碼「自然順序」排：0、1、2…9、10、11（不是 0、1、10、11、2）
+  data.sort((a, b) => (a.round_id - b.round_id) || String(a.code).localeCompare(String(b.code), "zh-Hant", { numeric: true }));
   $("openProds").innerHTML = data.map((p) => `
     <div class="prod">
       <div><span class="code">${esc(p.code)}</span> <span class="nm">${esc(p.name)}</span></div>
