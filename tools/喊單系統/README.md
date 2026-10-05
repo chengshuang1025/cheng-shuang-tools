@@ -10,7 +10,7 @@ FB 社團團購的喊單、到貨、出貨查詢系統。網址：
 ## 架構
 - 網頁：純 HTML + JS，跟團購網站一起由 GitHub Actions 發布到 GitHub Pages 的 `/order/`
 - 資料庫與登入：Supabase 專案 `group-buy`（東京機房，免費方案）
-- 登入方式：手機號碼＋密碼（可用）；Facebook 登入（Meta App「好事丞雙團購」，ID 1618683120034433，未發佈：Meta 要求先完成商家驗證＋App 審查）
+- 登入方式：客人頁只有手機號碼＋密碼；後台頁（admin.html）有自己的登入畫面：團主用 Facebook、夥伴用手機。Facebook 登入（Meta App「好事丞雙團購」，ID 1618683120034433，未發佈：Meta 要求先完成商家驗證＋App 審查）
 - 每天的 GitHub Actions 排程會讀一次 `heartbeat` 表，避免 Supabase 免費方案閒置 7 天被暫停
 
 ## 三種身分
