@@ -24,7 +24,7 @@ async function boot(session) {
   $("whoBox").hidden = false;
   $("meName").textContent = S.myName || "我";
   $("meRole").textContent = { admin: "管理者", partner: "夥伴", customer: "客人" }[S.role];
-  if (S.role === "customer") { $("myUid").textContent = S.uid; $("v-noperm").hidden = false; return; }
+  if (S.role === "customer") { $("v-noperm").hidden = false; return; }
   $("v-app").hidden = false;
   if (!isAdmin()) {
     document.querySelectorAll(".tab").forEach((t) => { t.hidden = !["prod", "order"].includes(t.dataset.p); });
