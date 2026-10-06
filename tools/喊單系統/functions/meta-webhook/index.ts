@@ -227,6 +227,18 @@ Deno.serve(async (req) => {
     if (url.searchParams.get("hub.mode") === "subscribe" && url.searchParams.get("hub.verify_token") === data?.verify_token) {
       return new Response(url.searchParams.get("hub.challenge") || "", { status: 200 });
     }
+    // 檢查連線狀態（只回報訂閱與權限，不含權杖），要帶驗證權杖才能看
+    if (url.searchParams.get("hub.mode") === "check" && url.searchParams.get("hub.verify_token") === data?.verify_token) {
+      const { data: conn } = await db.from("meta_connection").select("*").eq("id", 1).maybeSingle();
+      const out: Record<string, unknown> = { page: conn?.page_name, ig: conn?.ig_username };
+      try {
+        const appToken = `${Deno.env.get("META_APP_ID") ?? "1392117529656742"}|${APP_SECRET}`;
+        out.subscribed_apps = (await graphGet(`${conn.page_id}/subscribed_apps`, {}, conn.page_token)).data;
+        const dbg = await graphGet("debug_token", { input_token: conn.page_token }, appToken);
+        out.token = { type: dbg.data?.type, valid: dbg.data?.is_valid, expires: dbg.data?.expires_at, scopes: dbg.data?.scopes };
+      } catch (e) { out.error = (e as Error).message; }
+      return new Response(JSON.stringify(out, null, 2), { headers: { "Content-Type": "application/json" } });
+    }
     return new Response("forbidden", { status: 403 });
   }
   if (req.method !== "POST") return new Response("ok");
