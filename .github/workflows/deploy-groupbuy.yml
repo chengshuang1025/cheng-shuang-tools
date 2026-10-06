@@ -43,7 +43,7 @@ jobs:
           rm -f _site/README.md
           mkdir -p _site/order
           cp -r "tools/喊單系統/." _site/order/
-          rm -rf _site/order/sql _site/order/README.md
+          rm -rf _site/order/sql _site/order/functions _site/order/README.md
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

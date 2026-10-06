@@ -117,7 +117,10 @@ async function loadRound() {
 function showTab(k) {
   S.tab = k;
   document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", t.dataset.p === k));
-  ["ship", "cust", "prod", "order", "imp", "view", "acct"].forEach((x) => { $("p-" + x).hidden = x !== k; });
+  ["camp", "reply", "ship", "cust", "prod", "order", "imp", "view", "acct"].forEach((x) => { $("p-" + x).hidden = x !== k; });
+  // 團購／自動回覆不分團，上面的「選團」列先藏起來
+  document.querySelector(".roundbar").hidden = k === "camp" || k === "reply";
+  if (window.HUB) HUB.onTab(k);
   if (k === "acct") loadAccounts();
   if (k === "ship") loadShips();
 }

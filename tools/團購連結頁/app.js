@@ -185,10 +185,34 @@
   }
 
   /* ---------- 團購清單 ---------- */
-  function renderGroupBuys() {
+  /* ---------- 從總後台（資料庫）讀團購；讀不到就用 data.js 備份 ---------- */
+  const DB = {
+    url: "https://swfpfnvnydekyuwcagdy.supabase.co/rest/v1/site_campaigns?select=*&order=sort",
+    key: "sb_publishable_1dorLitRmxPW2mXqOURLqA_-881MPuO"
+  };
+  async function loadGroupBuys() {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(DB.url, { headers: { apikey: DB.key }, cache: "no-store", signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!r.ok) throw new Error(r.status);
+      const rows = await r.json();
+      if (!Array.isArray(rows) || !rows.length) throw new Error("empty");
+      return rows.map((c) => ({
+        title: c.title, desc: c.descr, points: c.points || [], image: c.image || "",
+        url: c.url || "", tag: c.tag || "", start: c.start_date || "", end: c.end_date || "",
+        worksheet: !!c.worksheet
+      }));
+    } catch (e) {
+      return typeof GROUP_BUYS !== "undefined" ? GROUP_BUYS : [];
+    }
+  }
+
+  function renderGroupBuys(list) {
     const today = todayStr();
     const buckets = { active: [], upcoming: [], ended: [] };
-    (typeof GROUP_BUYS !== "undefined" ? GROUP_BUYS : []).forEach((item) => {
+    list.forEach((item) => {
       buckets[classify(item, today)].push(item);
     });
 
@@ -250,5 +274,5 @@
   }
 
   renderProfile();
-  renderGroupBuys();
+  loadGroupBuys().then(renderGroupBuys);
 })();

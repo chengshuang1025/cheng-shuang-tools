@@ -1,0 +1,241 @@
+// meta-webhook：接收 IG／FB 粉絲頁的留言與私訊通知，自動回覆
+// 流程：
+//   留言含關鍵字 → 公開回一句「已私訊妳囉」→ 私訊對方
+//     要先追蹤：私訊附「我追蹤好了，領取」按鈕 → 對方按下後，IG 查是否真的有追蹤，有才送連結；FB 無法查，按了就送
+//     不用追蹤：私訊直接送連結
+//   沒有關鍵字 → 交給 Gemini 判斷是不是團購問題，資料裡有答案就私訊回答，沒有就留給團主處理
+// 需要的 Secrets：META_APP_SECRET、GEMINI_API_KEY（GEMINI_MODEL、GRAPH_VERSION 可不設）
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const GV = Deno.env.get("GRAPH_VERSION") ?? "v23.0";
+const G = `https://graph.facebook.com/${GV}`;
+const APP_SECRET = Deno.env.get("META_APP_SECRET") ?? "";
+const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+type Ctx = { settings: any; conn: any; rules: any[] };
+type Platform = "ig" | "fb";
+
+// ---------- 小工具 ----------
+const norm = (s: string) => String(s || "").toLowerCase().replace(/\s+/g, "");
+const todayTW = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+
+async function verifySignature(raw: string, header: string | null) {
+  if (!APP_SECRET) return true; // 還沒設定密鑰時先不檢查（測試用）
+  if (!header?.startsWith("sha256=")) return false;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(APP_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(raw)));
+  const hex = [...sig].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hex === header.slice(7);
+}
+
+async function graphPost(path: string, body: Record<string, unknown>, token: string) {
+  const r = await fetch(`${G}/${path}?access_token=${encodeURIComponent(token)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error) throw new Error(j.error?.message || `Graph API ${r.status}`);
+  return j;
+}
+async function graphGet(path: string, params: Record<string, string>, token: string) {
+  const qs = new URLSearchParams({ ...params, access_token: token }).toString();
+  const r = await fetch(`${G}/${path}?${qs}`);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error) throw new Error(j.error?.message || `Graph API ${r.status}`);
+  return j;
+}
+
+// 公開回覆在留言底下
+async function publicReply(p: Platform, commentId: string, text: string, ctx: Ctx) {
+  if (!text) return;
+  if (p === "ig") await graphPost(`${commentId}/replies`, { message: text }, ctx.conn.page_token);
+  else await graphPost(`${commentId}/comments`, { message: text }, ctx.conn.page_token);
+}
+// 私訊：recipient 可以是 {comment_id}（從留言私訊，只能一次）或 {id}（對方已經傳過訊息）
+async function sendDM(recipient: Record<string, string>, text: string, ctx: Ctx, button?: { title: string; payload: string }) {
+  const message: Record<string, unknown> = { text };
+  if (button) message.quick_replies = [{ content_type: "text", title: button.title.slice(0, 20), payload: button.payload }];
+  try {
+    await graphPost(`${ctx.conn.page_id}/messages`, { recipient, message, ...(recipient.id ? { messaging_type: "RESPONSE" } : {}) }, ctx.conn.page_token);
+  } catch (e) {
+    if (!button) throw e;
+    // 有些情況不能帶按鈕：改成請對方回覆一句話
+    await graphPost(`${ctx.conn.page_id}/messages`, { recipient, message: { text: `${text}\n\n（完成後回覆我「好了」就可以領取喔）` } }, ctx.conn.page_token);
+  }
+}
+
+// 先寫一筆紀錄佔位，重複的通知就不會回兩次
+async function claim(row: Record<string, unknown>) {
+  const { data, error } = await db.from("reply_log").insert({ ...row, status: "skipped" }).select("id").single();
+  if (error) return null; // event_id 重複
+  return data.id as number;
+}
+const finish = (id: number, patch: Record<string, unknown>) => db.from("reply_log").update(patch).eq("id", id);
+
+function matchRule(p: Platform, text: string, ctx: Ctx) {
+  const t = norm(text);
+  return ctx.rules.find((r) => r.active && r.platforms.includes(p) && r.keywords.some((k: string) => k && t.includes(norm(k))));
+}
+const linkMessage = (rule: any) => [rule.message, rule.link].filter(Boolean).join("\n\n");
+
+// ---------- Gemini：判斷團購問題並回答 ----------
+async function askGemini(text: string, ctx: Ctx) {
+  if (!GEMINI_KEY) return null;
+  const t = todayTW();
+  const { data: camps } = await db.from("campaigns").select("title,descr,points,url,start_date,end_date,faq");
+  const info = (camps || [])
+    .filter((c: any) => !c.end_date || c.end_date >= t || (Date.parse(t) - Date.parse(c.end_date)) / 864e5 <= 7)
+    .map((c: any) => {
+      const st = c.start_date && c.start_date > t ? "即將開團" : c.end_date && c.end_date < t ? "已結束" : "開團中";
+      return `■ ${c.title}（${st}；開團 ${c.start_date || "已開賣"}，收團 ${c.end_date || "長期"}）\n介紹：${c.descr}\n賣點：${(c.points || []).join("；")}\n連結：${c.url || "（連結還沒公布）"}\n補充：${c.faq || "無"}`;
+    }).join("\n\n");
+  const prompt = `你是 IG/FB 創作者「好事丞雙」的留言小幫手。今天是 ${t}（台灣時間）。
+下面是目前的團購資料，只能根據這些資料回答，資料沒寫的（例如價格、運費沒寫）絕對不可以自己猜。
+
+${info || "（目前沒有團購資料）"}
+
+粉絲留言：「${text}」
+
+請判斷並只輸出 JSON：
+{"intent":"groupbuy"|"question"|"chat","can_answer":true|false,"answer":"..."}
+- intent：groupbuy＝在問團購（開團時間、連結、怎麼買、商品內容…）；question＝其他需要回答的問題；chat＝稱讚、心得、打招呼、表情符號等不需要回答的留言
+- can_answer：intent 是 groupbuy 而且上面資料足以完整回答時才是 true
+- answer：can_answer 為 true 時，寫要私訊給對方的回答（3～5 句，附上相關團購連結；如果還沒開團，告訴對方開團日期）。語氣要求：${ctx.settings.ai_style}`;
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
+    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", temperature: 0.3 } }),
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error("Gemini：" + (j.error?.message || r.status));
+  const out = j.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join("") || "{}";
+  return JSON.parse(out) as { intent: string; can_answer: boolean; answer: string };
+}
+
+// ---------- 留言 ----------
+async function onComment(p: Platform, c: { id: string; userId: string; userName: string; text: string; postId?: string }, ctx: Ctx) {
+  if (!c.text) return;
+  const logId = await claim({ platform: p, kind: "comment", event_id: `${p}:c:${c.id}`, post_id: c.postId, user_id: c.userId, user_name: c.userName, text: c.text });
+  if (!logId) return;
+  try {
+    const rule = matchRule(p, c.text, ctx);
+    if (rule) {
+      let dm: string, button: { title: string; payload: string } | undefined, action: string;
+      if (rule.require_follow) {
+        dm = p === "ig" ? ctx.settings.follow_prompt : ctx.settings.fb_like_prompt;
+        button = { title: ctx.settings.follow_button, payload: `GATE:${rule.id}` };
+        action = "gate_wait";
+      } else { dm = linkMessage(rule); action = "keyword"; }
+      await publicReply(p, c.id, ctx.settings.public_reply, ctx);
+      await sendDM({ comment_id: c.id }, dm, ctx, button);
+      await finish(logId, { rule_id: rule.id, action, reply: dm, status: "done" });
+      return;
+    }
+    if (!ctx.settings.ai_enabled) return;
+    const ai = await askGemini(c.text, ctx);
+    if (!ai) return;
+    if (ai.intent === "groupbuy" && ai.can_answer && ai.answer) {
+      await publicReply(p, c.id, ctx.settings.public_reply, ctx);
+      await sendDM({ comment_id: c.id }, ai.answer, ctx);
+      await finish(logId, { action: "ai", reply: ai.answer, status: "done" });
+    } else if (ai.intent === "groupbuy" || ai.intent === "question") {
+      await finish(logId, { action: "ai", status: "needs_human", error: "資料裡沒有答案，請團主回覆" });
+    } else {
+      await finish(logId, { action: "skip", status: "skipped" });
+    }
+  } catch (e) {
+    await finish(logId, { status: "error", error: (e as Error).message });
+  }
+}
+
+// ---------- 私訊（按下領取按鈕、或回覆「好了」）----------
+async function onMessage(p: Platform, m: any, ctx: Ctx) {
+  const sender = m.sender?.id;
+  if (!sender || m.message?.is_echo || sender === ctx.conn.page_id || sender === ctx.conn.ig_user_id) return;
+  const payload: string = m.message?.quick_reply?.payload || m.postback?.payload || "";
+  const text: string = m.message?.text || m.postback?.title || "";
+  let ruleId = payload.startsWith("GATE:") ? +payload.slice(5) : 0;
+  if (!ruleId) {
+    // 沒按按鈕而是打字：看這個人最近是不是在等領取
+    const { data } = await db.from("reply_log").select("rule_id").eq("platform", p).eq("user_id", sender).eq("action", "gate_wait")
+      .gte("created_at", new Date(Date.now() - 7 * 864e5).toISOString()).order("created_at", { ascending: false }).limit(1);
+    ruleId = data?.[0]?.rule_id || 0;
+    if (!ruleId) {
+      // 直接私訊關鍵字也可以領取
+      const r = matchRule(p, text, ctx);
+      if (!r) return; // 一般私訊交給團主自己看
+      ruleId = r.id;
+    }
+  }
+  const rule = ctx.rules.find((r) => r.id === ruleId && r.active);
+  if (!rule) return;
+  const logId = await claim({ platform: p, kind: "message", event_id: `${p}:m:${m.message?.mid || m.postback?.mid || crypto.randomUUID()}`, user_id: sender, text, rule_id: rule.id });
+  if (!logId) return;
+  try {
+    let ok = true, name = "";
+    if (rule.require_follow && p === "ig") {
+      const prof = await graphGet(sender, { fields: "username,is_user_follow_business" }, ctx.conn.page_token);
+      ok = !!prof.is_user_follow_business; name = prof.username || "";
+    }
+    if (ok) {
+      const dm = linkMessage(rule);
+      await sendDM({ id: sender }, dm, ctx);
+      await finish(logId, { action: "gate_ok", reply: dm, status: "done", user_name: name || null });
+    } else {
+      await sendDM({ id: sender }, ctx.settings.not_following, ctx, { title: ctx.settings.follow_button, payload: `GATE:${rule.id}` });
+      await finish(logId, { action: "gate_wait", reply: ctx.settings.not_following, status: "done", user_name: name || null });
+    }
+  } catch (e) {
+    await finish(logId, { status: "error", error: (e as Error).message });
+  }
+}
+
+// ---------- 分派 ----------
+async function handle(body: any) {
+  const [{ data: settings }, { data: conn }, { data: rules }] = await Promise.all([
+    db.from("reply_settings").select("*").eq("id", 1).single(),
+    db.from("meta_connection").select("*").eq("id", 1).maybeSingle(),
+    db.from("reply_rules").select("*"),
+  ]);
+  if (!settings?.enabled || !conn?.page_token) return;
+  const ctx: Ctx = { settings, conn, rules: rules || [] };
+  const p: Platform | null = body.object === "instagram" ? "ig" : body.object === "page" ? "fb" : null;
+  if (!p || (p === "ig" && !settings.ig_enabled) || (p === "fb" && !settings.fb_enabled)) return;
+
+  for (const entry of body.entry || []) {
+    for (const ch of entry.changes || []) {
+      const v = ch.value || {};
+      if (p === "ig" && ch.field === "comments") {
+        if (!v.from?.id || v.from.id === conn.ig_user_id || v.from.id === entry.id) continue; // 自己的回覆不處理
+        await onComment("ig", { id: v.id, userId: v.from.id, userName: v.from.username, text: v.text, postId: v.media?.id }, ctx);
+      }
+      if (p === "fb" && ch.field === "feed" && v.item === "comment" && v.verb === "add") {
+        if (!v.from?.id || v.from.id === conn.page_id) continue;
+        await onComment("fb", { id: v.comment_id, userId: v.from.id, userName: v.from.name, text: v.message, postId: v.post_id }, ctx);
+      }
+    }
+    for (const m of entry.messaging || []) await onMessage(p, m, ctx);
+  }
+}
+
+Deno.serve(async (req) => {
+  const url = new URL(req.url);
+  if (req.method === "GET") {
+    // Meta 設定 webhook 時的驗證
+    const { data } = await db.from("reply_settings").select("verify_token").eq("id", 1).single();
+    if (url.searchParams.get("hub.mode") === "subscribe" && url.searchParams.get("hub.verify_token") === data?.verify_token) {
+      return new Response(url.searchParams.get("hub.challenge") || "", { status: 200 });
+    }
+    return new Response("forbidden", { status: 403 });
+  }
+  if (req.method !== "POST") return new Response("ok");
+  const raw = await req.text();
+  if (!(await verifySignature(raw, req.headers.get("x-hub-signature-256")))) return new Response("bad signature", { status: 401 });
+  let body: any;
+  try { body = JSON.parse(raw); } catch { return new Response("ok"); }
+  // 先回 200 給 Meta，回覆在背景處理
+  // @ts-ignore EdgeRuntime 由 Supabase 提供
+  EdgeRuntime.waitUntil(handle(body).catch((e) => console.error("handle", e)));
+  return new Response("EVENT_RECEIVED");
+});

@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>好事丞雙 喊單後台</title>
+<title>好事丞雙 總後台</title>
 <meta name="robots" content="noindex">
 <link rel="icon" href="icon-1024.png">
 <link rel="apple-touch-icon" href="icon-1024.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Huninn&family=Noto+Sans+TC:wght@400;500;700&family=Oswald:wght@500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=20261006c">
+<link rel="stylesheet" href="style.css?v=20261006d">
 <style>
 .list{display:flex;flex-direction:column;gap:10px}
 .row{display:grid;grid-template-columns:150px minmax(0,1fr) 170px 112px 132px;gap:12px;align-items:center;background:var(--paper);border:1.5px solid var(--navy);border-left:6px solid var(--navy);border-radius:4px;padding:12px 16px}
@@ -60,6 +60,47 @@
 .cp:hover{border-color:var(--navy)}
 .req-foot{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-top:8px}
 .addform .input{padding:5px 8px;width:auto}
+/* 總後台：團購／自動回覆 */
+.tab.hub{border-color:var(--mustard);background:var(--mustard-soft)}
+.tab.hub[aria-selected="true"]{background:var(--mustard);border-color:var(--mustard);color:var(--navy)}
+.editor{margin-bottom:16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 16px;align-items:start}
+.grid2 .span2{grid-column:1/-1}
+@media (max-width:640px){.grid2{grid-template-columns:1fr}}
+.check{display:inline-flex;align-items:center;gap:7px;font-size:14px;margin:0 16px 10px 0;cursor:pointer}
+.check input{width:18px;height:18px;accent-color:var(--navy)}
+.ccard{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:14px;align-items:center;background:var(--paper);border:1.5px solid var(--navy);border-left:6px solid var(--navy);border-radius:4px;padding:10px 14px}
+.ccard.c-active{border-left-color:var(--ready)}.ccard.c-upcoming{border-left-color:var(--mustard)}.ccard.c-ended{opacity:.6}
+.ccard .th{width:64px;height:64px;border-radius:4px;background:var(--mustard-soft);display:grid;place-items:center;font-size:28px;overflow:hidden}
+.ccard .th img{width:100%;height:100%;object-fit:cover}
+.ccard .t{font-family:var(--f-head);font-size:17px;overflow-wrap:anywhere}
+.ccard .m{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
+.ccard .a{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+@media (max-width:640px){.ccard{grid-template-columns:52px minmax(0,1fr)}.ccard .th{width:52px;height:52px}.ccard .a{grid-column:1/-1;flex-direction:row;justify-content:flex-start;flex-wrap:wrap}}
+.connect{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px;border-left:8px solid #1877F2}
+.master{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-bottom:16px;padding:14px 18px}
+.master .check{margin:0 10px 0 0}
+.switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;margin-right:18px}
+.switch input{position:absolute;opacity:0;width:1px;height:1px}
+.switch span{width:46px;height:26px;border-radius:13px;background:var(--wait-soft);border:2px solid var(--navy);position:relative;transition:background .15s}
+.switch span::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--navy);transition:transform .15s}
+.switch input:checked+span{background:var(--ready)}
+.switch input:checked+span::after{transform:translateX(20px);background:var(--paper)}
+.switch input:focus-visible+span{outline:2px solid var(--red);outline-offset:2px}
+.switch b{font-family:var(--f-head);font-weight:400;font-size:17px}
+.subtabs{grid-template-columns:repeat(4,1fr)}
+@media (max-width:560px){.subtabs{grid-template-columns:1fr 1fr}.subtabs .segbtn:nth-child(3){border-left:0}.subtabs .segbtn:nth-child(n+3){border-top:2px solid var(--navy)}}
+.rcard{background:var(--paper);border:1.5px solid var(--navy);border-left:6px solid var(--red);border-radius:4px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between}
+.rcard.off{border-left-color:var(--wait);opacity:.65}
+.rcard .t{font-family:var(--f-head);font-size:16px}
+.kw{display:inline-block;background:var(--mustard-soft);border:1px solid var(--mustard);border-radius:3px;padding:0 7px;font-size:12.5px;margin:2px 4px 2px 0}
+.lrow{background:var(--paper);border:1.5px solid var(--soft-line);border-left:6px solid var(--wait);border-radius:4px;padding:9px 14px;font-size:14px}
+.lrow.done{border-left-color:var(--ready)}.lrow.needs_human{border-left-color:var(--red)}.lrow.error{border-left-color:var(--ship)}
+.lrow .lh{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:12.5px;color:var(--muted)}
+.lrow .lt{margin:3px 0;overflow-wrap:anywhere}
+.lrow .lr{font-size:13px;color:var(--navy);background:var(--navy-soft);border-radius:3px;padding:4px 8px;white-space:pre-wrap;overflow-wrap:anywhere}
+.copyline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.copyline code{background:#fffdf7;border:1.5px solid var(--soft-line);border-radius:3px;padding:3px 8px;font-size:13px;overflow-wrap:anywhere;word-break:break-all}
 .roundbar .addform{flex-wrap:nowrap}
 </style>
 </head>
@@ -76,7 +117,7 @@
       </svg>
       <div class="brand">
         <div class="mark" aria-hidden="true">丞</div>
-        <div><div class="eyebrow">RETRO POST ・ <span>好事丞雙 x 用插畫玩手作</span></div><h1>團購喊單後台<span class="plus">+1</span></h1></div>
+        <div><div class="eyebrow">RETRO POST ・ <span>好事丞雙 x 用插畫玩手作</span></div><h1>好事丞雙總後台<span class="plus">+1</span></h1></div>
       </div>
       <div class="who" id="whoBox" hidden>
         <span><b id="meName"></b>・<span id="meRole"></span></span>
@@ -128,6 +169,8 @@
     </div>
 
     <nav class="tabs" role="tablist" id="tabs">
+      <button class="tab hub" role="tab" data-p="camp" aria-selected="false" type="button">🧺 團購</button>
+      <button class="tab hub" role="tab" data-p="reply" aria-selected="false" type="button">💬 自動回覆<span class="badge" id="replyBadge" hidden></span></button>
       <button class="tab" role="tab" data-p="ship" aria-selected="false" type="button">出貨申請<span class="badge" id="shipBadge" hidden></span></button>
       <button class="tab" role="tab" data-p="cust" aria-selected="true" type="button">客人總覽</button>
       <button class="tab" role="tab" data-p="prod" aria-selected="false" type="button">商品</button>
@@ -136,6 +179,116 @@
       <button class="tab" role="tab" data-p="view" aria-selected="false" type="button">客人看到的畫面</button>
       <button class="tab" role="tab" data-p="acct" aria-selected="false" type="button">帳號<span class="badge" id="acctBadge" hidden></span></button>
     </nav>
+
+    <section id="p-camp" hidden>
+      <p class="hint">每一團只要在這裡填一次：團購網站會自動顯示，留言自動回覆也會用這些資料回答「什麼時候開團？連結在哪？」。按「儲存」後網站馬上更新，不用再改檔案。</p>
+      <div class="tools">
+        <div class="filters" id="campFilters"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <a class="btn small" href="../" target="_blank" rel="noopener">看團購網站 ↗</a>
+          <button class="btn primary" id="campNew" type="button">＋ 新增團購</button>
+        </div>
+      </div>
+      <form id="campForm" class="card dashed editor" hidden novalidate>
+        <h3 id="campFormTitle" style="margin-top:0">新增團購</h3>
+        <div class="grid2">
+          <div class="field span2"><label for="cfTitle">團購名稱 *</label><input class="input" id="cfTitle" required></div>
+          <div class="field span2"><label for="cfDescr">一句話介紹</label><input class="input" id="cfDescr" placeholder="例如：台灣小農鮮果乾，低溫烘乾"></div>
+          <div class="field"><label for="cfStart">開團日</label><input class="input" id="cfStart" type="date"><small>沒填＝已經開賣</small></div>
+          <div class="field"><label for="cfEnd">收團日</label><input class="input" id="cfEnd" type="date"><small>過了這天網站會自動移到「已結束」</small></div>
+          <div class="field span2"><label for="cfUrl">團購連結</label><input class="input" id="cfUrl" type="url" placeholder="https://…"><small>還沒拿到可以先空著，網站會顯示「連結準備中」</small></div>
+          <div class="field"><label for="cfTag">分類</label><input class="input" id="cfTag" list="tagList" placeholder="食品、生活用品…">
+            <datalist id="tagList"><option>生活用品</option><option>食品</option><option>玩具</option><option>教材</option><option>文具</option><option>服飾</option></datalist></div>
+          <div class="field"><label for="cfImage">圖片</label><input class="input" id="cfImage" placeholder="assets/xxx.jpg 或圖片網址"><small>可先空著，會顯示分類小圖示</small></div>
+          <div class="field span2"><label for="cfPoints">賣點（一行一個）</label><textarea id="cfPoints" rows="4"></textarea></div>
+          <div class="field span2"><label for="cfFaq">給自動回覆的補充資訊</label><textarea id="cfFaq" rows="4" placeholder="例如：價格 $399 起、滿 $750 免運、付款後 3–5 天出貨、有學習單（留言「學習單」領取）"></textarea><small>不會顯示在網站上，只給自動回覆參考。沒寫在這裡的事，自動回覆不會亂回答，會留給妳處理。</small></div>
+          <label class="check"><input type="checkbox" id="cfOnSite" checked> 顯示在團購網站</label>
+          <label class="check"><input type="checkbox" id="cfWorksheet"> 這團有搭配學習單</label>
+        </div>
+        <div class="err" id="campErr" hidden></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+          <button class="btn primary" type="submit">儲存</button>
+          <button class="btn" type="button" id="campCancel">取消</button>
+          <button class="btn red" type="button" id="campDel" style="margin-left:auto" hidden>刪除這團</button>
+        </div>
+      </form>
+      <div id="campList" class="list"><p class="loading">讀取中…</p></div>
+    </section>
+
+    <section id="p-reply" hidden>
+      <div class="card connect" id="metaCard">
+        <div>
+          <h3 style="margin:0 0 4px">連接 FB 粉絲頁與 IG</h3>
+          <div id="metaState" class="hint" style="margin:0">讀取中…</div>
+        </div>
+        <button class="btn fb" id="metaConnect" type="button" style="width:auto">用 Facebook 連接</button>
+      </div>
+
+      <div class="card master">
+        <label class="switch"><input type="checkbox" id="rsEnabled"><span></span><b>自動回覆總開關</b></label>
+        <label class="check"><input type="checkbox" id="rsIg"> IG 留言</label>
+        <label class="check"><input type="checkbox" id="rsFb"> FB 粉絲頁留言</label>
+        <label class="check"><input type="checkbox" id="rsAi"> 用 AI 回答團購問題</label>
+      </div>
+
+      <nav class="seg subtabs" id="replySub">
+        <button class="segbtn" data-s="rules" aria-pressed="true" type="button">關鍵字規則</button>
+        <button class="segbtn" data-s="log" aria-pressed="false" type="button">回覆紀錄<span class="badge" id="needBadge" hidden></span></button>
+        <button class="segbtn" data-s="texts" aria-pressed="false" type="button">回覆用語</button>
+        <button class="segbtn" data-s="setup" aria-pressed="false" type="button">串接設定</button>
+      </nav>
+
+      <div id="rs-rules">
+        <p class="hint">有人留言含有關鍵字（例如「學習單」），系統會先公開回一句「已私訊妳囉」，再私訊對方。勾「要先追蹤」的話，IG 會確認對方真的有追蹤才給連結；FB 粉絲頁沒辦法查，會請對方按讚後按按鈕領取。</p>
+        <button class="btn primary" id="ruleNew" type="button" style="margin-bottom:12px">＋ 新增關鍵字規則</button>
+        <form id="ruleForm" class="card dashed editor" hidden novalidate>
+          <h3 id="ruleFormTitle" style="margin-top:0">新增關鍵字規則</h3>
+          <div class="grid2">
+            <div class="field"><label for="rfName">規則名稱</label><input class="input" id="rfName" placeholder="例如：VEGANWELL 學習單"></div>
+            <div class="field"><label for="rfKeys">關鍵字 *</label><input class="input" id="rfKeys" placeholder="學習單, 想要學習單"><small>用逗號分開，留言含其中一個就會觸發</small></div>
+            <div class="field span2"><label for="rfCamp">跟哪一團有關（選填）</label><select id="rfCamp"></select></div>
+            <div class="field span2"><label for="rfMsg">私訊內容</label><textarea id="rfMsg" rows="3" placeholder="這是答應妳的學習單 🎁 下載後印 A4 就可以玩囉！"></textarea></div>
+            <div class="field span2"><label for="rfLink">要送出的連結</label><input class="input" id="rfLink" type="url" placeholder="https://drive.google.com/…"><small>記得先把檔案上傳到雲端、開「知道連結的人都能檢視」再貼上</small></div>
+            <label class="check"><input type="checkbox" id="rfFollow" checked> 要先追蹤才給連結</label>
+            <label class="check"><input type="checkbox" id="rfActive" checked> 啟用</label>
+            <label class="check"><input type="checkbox" id="rfIg" checked> IG</label>
+            <label class="check"><input type="checkbox" id="rfFb" checked> FB 粉絲頁</label>
+          </div>
+          <div class="err" id="ruleErr" hidden></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+            <button class="btn primary" type="submit">儲存</button>
+            <button class="btn" type="button" id="ruleCancel">取消</button>
+            <button class="btn red" type="button" id="ruleDel" style="margin-left:auto" hidden>刪除規則</button>
+          </div>
+        </form>
+        <div id="ruleList" class="list"><p class="loading">讀取中…</p></div>
+      </div>
+
+      <div id="rs-log" hidden>
+        <p class="hint">最近 100 則自動處理的留言。「要妳處理」是系統看不懂、或資料裡沒有答案的留言，回覆完按「已處理」。</p>
+        <div class="filters" id="logFilters" style="margin-bottom:12px"></div>
+        <div id="logList" class="list"><p class="loading">讀取中…</p></div>
+      </div>
+
+      <form id="rs-texts" hidden novalidate>
+        <p class="hint">自動回覆會用到的固定句子，改完按最下面的「儲存用語」。</p>
+        <div class="field"><label for="tPublic">公開回覆在留言底下的一句話</label><input class="input" id="tPublic"></div>
+        <div class="field"><label for="tPrompt">IG：請對方追蹤的私訊</label><textarea id="tPrompt" rows="3"></textarea></div>
+        <div class="field"><label for="tButton">領取按鈕上的字</label><input class="input" id="tButton" maxlength="20"><small>最多 20 個字</small></div>
+        <div class="field"><label for="tNot">IG：按了按鈕但還沒追蹤時</label><textarea id="tNot" rows="3"></textarea></div>
+        <div class="field"><label for="tFb">FB 粉絲頁：請對方按讚的私訊</label><textarea id="tFb" rows="3"></textarea></div>
+        <div class="field"><label for="tStyle">AI 回答的語氣</label><textarea id="tStyle" rows="3"></textarea></div>
+        <button class="btn primary" type="submit">儲存用語</button>
+      </form>
+
+      <div id="rs-setup" hidden>
+        <p class="hint">這些是在 Meta 開發者後台設定 Webhook 時要填的資料，平常不用動。</p>
+        <div class="card">
+          <div class="field"><label>Webhook 網址（Callback URL）</label><div class="copyline"><code id="whUrl"></code><button class="cp" type="button" data-copy="whUrl">複製</button></div></div>
+          <div class="field" style="margin:0"><label>驗證權杖（Verify token）</label><div class="copyline"><code id="whToken"></code><button class="cp" type="button" data-copy="whToken">複製</button></div></div>
+        </div>
+      </div>
+    </section>
 
     <section id="p-ship" hidden>
       <p class="hint">客人在查詢頁按「我想要出貨」後會出現在這裡（不分團）。到全家好賣+ 開單時，按每一格旁的「複製」貼上就好；開完單按「已開單，標記出貨」。</p>
@@ -224,7 +377,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=20261006c"></script>
-<script src="admin.js?v=20261006c"></script>
+<script src="config.js?v=20261006d"></script>
+<script src="admin.js?v=20261006d"></script>
+<script src="hub.js?v=20261006d"></script>
 </body>
 </html>
