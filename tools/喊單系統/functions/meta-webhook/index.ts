@@ -162,10 +162,26 @@ async function onMessage(p: Platform, m: any, ctx: Ctx) {
       .gte("created_at", new Date(Date.now() - 7 * 864e5).toISOString()).order("created_at", { ascending: false }).limit(1);
     ruleId = data?.[0]?.rule_id || 0;
     if (!ruleId) {
-      // 直接私訊關鍵字也可以領取
+      // 直接私訊關鍵字：跟留言一樣，要先追蹤的話先請對方追蹤／按讚，再按按鈕領取
       const r = matchRule(p, text, ctx);
       if (!r) return; // 一般私訊交給團主自己看
-      ruleId = r.id;
+      const mid = m.message?.mid || crypto.randomUUID();
+      const id0 = await claim({ platform: p, kind: "message", event_id: `${p}:m:${mid}`, user_id: sender, text, rule_id: r.id });
+      if (!id0) return;
+      try {
+        if (r.require_follow) {
+          const dm = p === "ig" ? ctx.settings.follow_prompt : ctx.settings.fb_like_prompt;
+          await sendDM({ id: sender }, dm, ctx, { title: ctx.settings.follow_button, payload: `GATE:${r.id}` });
+          await finish(id0, { action: "gate_wait", reply: dm, status: "done" });
+        } else {
+          const dm = linkMessage(r);
+          await sendDM({ id: sender }, dm, ctx);
+          await finish(id0, { action: "keyword", reply: dm, status: "done" });
+        }
+      } catch (e) {
+        await finish(id0, { status: "error", error: (e as Error).message });
+      }
+      return;
     }
   }
   const rule = ctx.rules.find((r) => r.id === ruleId && r.active);
