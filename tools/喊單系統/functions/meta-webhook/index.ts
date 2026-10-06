@@ -11,7 +11,7 @@ const GV = Deno.env.get("GRAPH_VERSION") ?? "v23.0";
 const G = `https://graph.facebook.com/${GV}`;
 const APP_SECRET = Deno.env.get("META_APP_SECRET") ?? "";
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.8-flash";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
 type Ctx = { settings: any; conn: any; rules: any[] };
