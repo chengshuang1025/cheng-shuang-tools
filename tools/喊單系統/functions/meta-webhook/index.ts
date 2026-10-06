@@ -214,6 +214,8 @@ async function handle(body: any) {
     db.from("meta_connection").select("*").eq("id", 1).maybeSingle(),
     db.from("reply_rules").select("*"),
   ]);
+  // 偶爾清掉 90 天前的回覆紀錄（隱私權政策承諾最多保存 90 天）
+  if (Math.random() < 0.05) await db.from("reply_log").delete().lt("created_at", new Date(Date.now() - 90 * 864e5).toISOString());
   if (!settings?.enabled || !conn?.page_token) return;
   const ctx: Ctx = { settings, conn, rules: rules || [] };
   const p: Platform | null = body.object === "instagram" ? "ig" : body.object === "page" ? "fb" : null;
