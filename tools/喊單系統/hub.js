@@ -242,27 +242,19 @@
     H.logs.find((l) => l.id === +b.dataset.done).handled = true; renderLogs();
   };
 
-  // ========== 連接 Meta：用 FB 登入多拿粉絲頁／IG 權限，交給伺服器換成長期權杖 ==========
+  // ========== 連接 Meta：到 Facebook 授權「好事丞雙自動回覆」App，伺服器換成粉絲頁長期權杖 ==========
+  const META_APP_ID = "1392117529656742";
   const META_SCOPES = "pages_show_list,pages_manage_metadata,pages_read_engagement,pages_manage_engagement,pages_read_user_content,pages_messaging,instagram_basic,instagram_manage_comments,instagram_manage_messages,business_management";
   $("metaConnect").onclick = async () => {
-    sessionStorage.setItem("metaConnect", "1");
-    const { error } = await sb.auth.signInWithOAuth({ provider: "facebook", options: { scopes: META_SCOPES, redirectTo: location.origin + location.pathname, queryParams: { auth_type: "rerequest" } } });
-    if (error) { sessionStorage.removeItem("metaConnect"); toast(errMsg(error)); }
+    const { data, error } = await sb.from("meta_oauth_state").insert({}).select("id").single();
+    if (error) return toast(errMsg(error));
+    const q = new URLSearchParams({ client_id: META_APP_ID, redirect_uri: FN + "meta-connect", state: data.id, scope: META_SCOPES, response_type: "code", auth_type: "rerequest" });
+    location.href = "https://www.facebook.com/v23.0/dialog/oauth?" + q.toString();
   };
-  async function finishMetaConnect() {
-    if (!sessionStorage.getItem("metaConnect")) return;
-    sessionStorage.removeItem("metaConnect");
-    const { data: { session } } = await sb.auth.getSession();
-    if (!session?.provider_token) { toast("沒有拿到 Facebook 授權，請再按一次「用 Facebook 連接」"); return; }
-    $("metaState").textContent = "連接中…";
-    try {
-      const r = await fetch(FN + "meta-connect", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token, apikey: GB_CONFIG.key }, body: JSON.stringify({ user_token: session.provider_token }) });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || "連接失敗（" + r.status + "）");
-      toast("已連接 " + j.page_name + (j.ig_username ? "＋IG @" + j.ig_username : ""));
-    } catch (e) { toast(e.message); }
-    const { data } = await sb.rpc("meta_status"); renderMeta(data);
-  }
+  // 從 Facebook 授權回來時，網址會帶 ?meta=ok 或 ?meta_error=…
+  const backParams = new URLSearchParams(location.search);
+  const metaResult = backParams.get("meta") ? "ok" : backParams.get("meta_error");
+  if (metaResult) history.replaceState(null, "", location.pathname);
 
   window.HUB = {
     onTab(k) {
@@ -274,8 +266,10 @@
   (async () => {
     for (let i = 0; i < 40 && !S.role; i++) await new Promise((r) => setTimeout(r, 250));
     if (S.role !== "admin") return;
-    if (sessionStorage.getItem("metaConnect")) { showTab("reply"); await finishMetaConnect(); }
-    else loadLogs();
+    if (metaResult) {
+      showTab("reply");
+      toast(metaResult === "ok" ? "已連接粉絲頁與 IG 🎉" : "連接失敗：" + metaResult);
+    } else loadLogs();
   })();
   // 每 2 分鐘看一下有沒有需要處理的留言（顯示在分頁的紅點）
   setInterval(() => { if (S.role === "admin" && H.loaded.reply) loadLogs(); }, 120000);
