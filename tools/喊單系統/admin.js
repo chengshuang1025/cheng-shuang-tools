@@ -441,7 +441,7 @@ async function loadAccounts() {
     const how = p.provider === "facebook" ? "Facebook" : "手機";
     return `<tr>
       <td>${esc(p.display_name || "（沒有名字）")}${me ? "（你）" : ""}</td>
-      <td>${esc(p.phone || "—")}</td><td>${how}</td>
+      <td><span id="phx-${p.id}">${esc(p.phone || "—")}${p.provider === "email" && !me ? ` <button class="cp" type="button" data-phopen="${p.id}">改號碼</button>` : ""}</span></td><td>${how}</td>
       <td>${p.customer_id ? `${esc(p.customer_name)} <button class="cp" type="button" data-unbind="${p.customer_id}">解除</button>` : (p.role === "customer" ? `<span style="color:var(--muted)">未綁定</span>` : "—")}</td>
       <td>${me ? "管理者" : `<select id="role-${p.id}" data-role="${p.id}" aria-label="身分">${[["customer", "客人"], ["partner", "夥伴"], ["admin", "管理者"]].map(([k, l]) => `<option value="${k}" ${p.role === k ? "selected" : ""}>${l}</option>`).join("")}</select>`}</td>
       <td>${p.provider === "email" && !me ? `<span class="pwbox" id="pw-${p.id}"><button class="btn small" type="button" data-pwopen="${p.id}">重設密碼</button></span>` : "—"}</td>
@@ -507,6 +507,24 @@ document.addEventListener("click", async (e) => {
     const { error } = await sb.rpc("admin_unbind_customer", { p_customer: +b.dataset.unbind });
     if (error) return toast(errMsg(error));
     toast("已解除綁定"); loadAccounts(); if (S.rid) loadRound();
+    return;
+  }
+  if (b.dataset.phopen) {
+    const id = b.dataset.phopen;
+    const a = (S.accts || []).find((x) => x.id === id);
+    $("phx-" + id).innerHTML = `<input type="tel" id="phv-${id}" value="${esc(a?.phone || "")}" placeholder="09xxxxxxxx" inputmode="numeric" aria-label="新手機號碼" style="width:120px"><button class="btn red small" type="button" data-phset="${id}">確定</button>`;
+    $("phv-" + id).select();
+    return;
+  }
+  if (b.dataset.phset) {
+    const id = b.dataset.phset, ph = GB.normPhone($("phv-" + id).value);
+    if (!/^09\d{8}$/.test(ph)) return toast("請輸入 09 開頭的 10 碼手機號碼");
+    if (!confirm(`確定把這個帳號的手機改成 ${ph}？\n之後客人要用新號碼＋原本的密碼登入。`)) return;
+    b.disabled = true;
+    const { error } = await sb.rpc("admin_set_phone", { p_user: id, p_phone: ph });
+    b.disabled = false;
+    if (error) return toast(errMsg(error));
+    toast("已改好，請客人用新號碼＋原本的密碼登入"); loadAccounts(); if (S.rid) loadRound();
     return;
   }
   if (b.dataset.pwopen) {
