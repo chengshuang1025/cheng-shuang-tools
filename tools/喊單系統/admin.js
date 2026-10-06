@@ -178,7 +178,7 @@ function renderRows() {
     const chips = its.slice().sort((a, b) => sortCode(prod(a.product_id), prod(b.product_id))).map((i) => {
       const p = prod(i.product_id);
       const cls = i.shipped_at ? "done" : p.status === "arrived" ? "arrived" : "";
-      return `<span class="it ${cls}" title="${i.shipped_at ? "出貨 " + md(i.shipped_at) : ST[p.status]}${i.source === "self" ? "・客人自己 +1" : ""}">${esc(p.code)}・${esc(p.name)}×${i.qty}</span>`;
+      return `<span class="it ${cls}" title="${i.shipped_at ? "出貨 " + md(i.shipped_at) : ST[p.status]}${i.source === "self" ? "・客人自己 +1" : ""}">${esc(p.code)}・${esc(p.name)}×${i.qty}${i.shipped_at ? "" : `<button class="x" type="button" data-cancelitem="${i.id}" title="取消此商品" aria-label="取消此商品 ${esc(p.name)}">取消此商品</button>`}</span>`;
     }).join(" ");
     const act = s === "ship"
       ? `<small>出貨 ${md(shipped[0].shipped_at)}</small><button class="btn small" type="button" data-undo="${c.id}">取消出貨</button>`
@@ -472,6 +472,24 @@ document.addEventListener("click", async (e) => {
     await sb.from("order_items").update({ shipped_at: null }).in("id", r.item_ids);
     await sb.from("ship_requests").update({ status: "pending", handled_at: null }).eq("id", r.id);
     toast("已改回未處理"); loadShips(); if (S.rid) loadRound();
+    return;
+  }
+  if (b.dataset.cancelitem) {
+    const id = +b.dataset.cancelitem;
+    const it = S.items.find((x) => x.id === id);
+    const p = it && prod(it.product_id);
+    const c = it && S.customers?.find?.((x) => x.id === it.customer_id);
+    if (!confirm(`確定取消${c ? "「" + c.fb_name + "」的" : ""}「${p ? p.code + "・" + p.name : "這個商品"} ×${it?.qty ?? ""}」？\n取消後客人那邊也會看不到這項。`)) return;
+    b.disabled = true;
+    // 如果這項在待處理的出貨申請裡，先從申請拿掉（拿光了就把申請取消）
+    const { data: reqs } = await sb.from("ship_requests").select("id, item_ids").eq("status", "pending").contains("item_ids", [id]);
+    for (const r of reqs || []) {
+      const left = r.item_ids.filter((x) => x !== id);
+      await sb.from("ship_requests").update(left.length ? { item_ids: left } : { item_ids: left, status: "cancelled", handled_at: new Date().toISOString() }).eq("id", r.id);
+    }
+    const { error } = await sb.from("order_items").delete().eq("id", id);
+    if (error) { b.disabled = false; return toast(errMsg(error)); }
+    toast("已取消這項商品"); loadShips(); if (S.rid) loadRound();
     return;
   }
   if (b.dataset.bind) {

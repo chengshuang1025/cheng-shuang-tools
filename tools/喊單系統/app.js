@@ -64,6 +64,7 @@ $("logout").onclick = async () => { await sb.auth.signOut(); };
 
 // ---------- 畫面 ----------
 async function show(session) {
+  cart.clear(); renderCart();
   if (!session) { $("v-login").hidden = false; $("v-me").hidden = true; return; }
   $("v-login").hidden = true; $("v-me").hidden = false;
   const { data: prof } = await sb.from("profiles").select("display_name, role, phone").eq("id", session.user.id).maybeSingle();
@@ -128,8 +129,8 @@ async function loadMine() {
     const isPhone = user?.app_metadata?.provider === "email";
     $("mine").innerHTML = isPhone && !cust
       ? `<div class="card dashed" style="background:var(--mustard-soft)"><b>帳號已建立，等團主確認中</b>
-          <p class="hint" style="margin:6px 0 0">團主確認你是社團裡的「${esc(me?.display_name || "")}」之後，你在社團喊的單就會出現在這裡，通常不用等太久。<br>也可以先在下面「正在收單」直接按 +1。</p></div>`
-      : `<div class="card"><p class="hint" style="margin:0">目前還沒有你的喊單。<br>在社團喊單後，團主匯入就會出現在這裡；也可以直接在下面「正在收單」按 +1。</p></div>`;
+          <p class="hint" style="margin:6px 0 0">團主確認你是社團裡的「${esc(me?.display_name || "")}」之後，你在社團喊的單就會出現在這裡，通常不用等太久。<br>也可以先在下面「正在收單」選商品加購。</p></div>`
+      : `<div class="card"><p class="hint" style="margin:0">目前還沒有你的喊單。<br>在社團喊單後，團主匯入就會出現在這裡；也可以直接在下面「正在收單」選商品加購。</p></div>`;
     return;
   }
   const reqs = (cust.ship_requests || []).filter((r) => r.status !== "cancelled");
@@ -212,6 +213,10 @@ async function loadOpen() {
   if (!data.length) { $("openProds").innerHTML = `<p class="hint">目前沒有正在收單的商品，開團時會出現在這裡。</p>`; return; }
   // 依喊單代碼「自然順序」排：0、1、2…9、10、11（不是 0、1、10、11、2）
   data.sort((a, b) => (a.round_id - b.round_id) || String(a.code).localeCompare(String(b.code), "zh-Hant", { numeric: true }));
+  openById = Object.fromEntries(data.map((p) => [p.id, p]));
+  // 清單裡如果有已經結單的商品，拿掉
+  for (const id of [...cart.keys()]) if (!openById[id]) cart.delete(id);
+  renderCart();
   $("openProds").innerHTML = data.map((p) => `
     <div class="prod">
       <div><span class="code">${esc(p.code)}</span> <span class="nm">${esc(p.name)}</span></div>
@@ -219,9 +224,53 @@ async function loadOpen() {
       <div class="money" style="font-size:18px">${p.price != null ? "$" + fmt(p.price) : "價格待公布"}</div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
         <div class="stepper"><button type="button" data-dec="${p.id}" aria-label="減少">−</button><span id="q-${p.id}">1</span><button type="button" data-inc="${p.id}" aria-label="增加">+</button></div>
-        <button class="btn red" type="button" data-plus="${p.id}">+1 喊單</button>
+        <button class="btn red" type="button" data-add="${p.id}">加入清單</button>
       </div>
     </div>`).join("");
+}
+
+// ---------- 加購小清單：先選好，按「確認加購」才記進喊單 ----------
+const cart = new Map(); // product id -> qty
+let openById = {};
+function renderCart() {
+  const box = $("cart");
+  if (!cart.size) { box.hidden = true; box.innerHTML = ""; return; }
+  const rows = [...cart].map(([id, qty]) => [openById[id], qty]).filter(([p]) => p);
+  const sum = rows.reduce((s, [p, q]) => s + (p.price || 0) * q, 0);
+  const hasTbd = rows.some(([p]) => p.price == null);
+  box.hidden = false;
+  box.innerHTML = `<h3>我的加購清單（還沒送出）</h3>
+    ${rows.map(([p, q]) => `<div class="cl">
+      <div><b>${esc(p.code)}・${esc(p.name)}</b><br><span style="color:var(--muted);font-size:13px">${p.price != null ? "$" + fmt(p.price) + " × " + q + " ＝ $" + fmt(p.price * q) : "價格待公布"}</span></div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="stepper"><button type="button" data-cdec="${p.id}" aria-label="減少">−</button><span>${q}</span><button type="button" data-cinc="${p.id}" aria-label="增加">+</button></div>
+        <button class="rm" type="button" data-crm="${p.id}">取消</button>
+      </div></div>`).join("")}
+    <div class="foot">
+      <div class="money">小計 <b>$${fmt(sum)}</b>${hasTbd ? "<span style='font-size:12px;color:var(--muted)'>（另有價格待公布）</span>" : ""}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn small" type="button" id="cartClear">全部清空</button>
+        <button class="btn red" type="button" id="cartOk">確認加購</button>
+      </div>
+    </div>`;
+  $("cartClear").onclick = () => { if (confirm("確定清空加購清單？")) { cart.clear(); renderCart(); } };
+  $("cartOk").onclick = submitCart;
+}
+async function submitCart() {
+  const btn = $("cartOk"); btn.disabled = true;
+  let ok = 0;
+  for (const [id, qty] of [...cart]) {
+    const { error } = await sb.rpc("plus_one", { p_product: id, p_qty: qty });
+    if (error) {
+      toast(`${openById[id]?.name || "商品"}：${errMsg(error)}`);
+      renderCart(); await loadMine(); return;
+    }
+    cart.delete(id); ok++;
+  }
+  renderCart();
+  toast(`已加購 ${ok} 項，記進你的喊單了`);
+  await loadMine();
+  $("mine").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 document.addEventListener("click", async (e) => {
@@ -235,16 +284,16 @@ document.addEventListener("click", async (e) => {
     if (error) return toast(errMsg(error));
     toast("已取消出貨申請"); loadMine();
   }
-  if (b.dataset.plus) {
-    const id = +b.dataset.plus, qty = +q(id).textContent;
-    b.disabled = true;
-    const { error } = await sb.rpc("plus_one", { p_product: id, p_qty: qty });
-    b.disabled = false;
-    if (error) return toast(errMsg(error));
-    toast(`已喊單 ×${qty}`);
+  if (b.dataset.add) {
+    const id = +b.dataset.add, qty = +q(id).textContent;
+    cart.set(id, Math.min(99, (cart.get(id) || 0) + qty));
     q(id).textContent = 1;
-    loadMine();
+    renderCart();
+    toast(`已加入清單：${openById[id]?.name || ""} ×${qty}`);
   }
+  if (b.dataset.cinc) { const id = +b.dataset.cinc; cart.set(id, Math.min(99, cart.get(id) + 1)); renderCart(); }
+  if (b.dataset.cdec) { const id = +b.dataset.cdec; cart.set(id, Math.max(1, cart.get(id) - 1)); renderCart(); }
+  if (b.dataset.crm) { cart.delete(+b.dataset.crm); renderCart(); }
 });
 
 // FB 登入失敗時，網址會帶回錯誤原因：顯示出來並清掉網址
