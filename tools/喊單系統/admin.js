@@ -198,6 +198,7 @@ function renderRows() {
   }).join("");
 }
 $("custq").oninput = renderRows;
+$("acctq").oninput = () => renderAccts();
 
 // ---------- 商品 ----------
 function renderProds() {
@@ -436,7 +437,16 @@ async function loadAccounts() {
     </div>`;
   }).join("") : `<div class="card"><p class="hint" style="margin:0">目前沒有等你綁定的客人。</p></div>`;
 
-  $("arows").innerHTML = accts.map((p) => {
+  // 正在帳號表裡輸入新密碼／新號碼時，自動更新先不重畫，免得打到一半被清掉
+  const typing = document.activeElement?.closest?.("#arows") && document.activeElement.tagName === "INPUT";
+  if (!typing) renderAccts();
+}
+function renderAccts() {
+  const accts = S.accts || [];
+  const q = norm($("acctq").value);
+  const list = q ? accts.filter((p) => [p.display_name, p.phone, p.customer_name].some((t) => norm(t).includes(q))) : accts;
+  if (!list.length) { $("arows").innerHTML = `<tr><td colspan="7" style="color:var(--muted)">${q ? `找不到符合「${esc($("acctq").value.trim())}」的帳號。` : "還沒有帳號。"}</td></tr>`; return; }
+  $("arows").innerHTML = list.map((p) => {
     const me = p.id === S.uid;
     const how = p.provider === "facebook" ? "Facebook" : "手機";
     return `<tr>

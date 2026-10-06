@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="icon-1024.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Huninn&family=Noto+Sans+TC:wght@400;500;700&family=Oswald:wght@500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=20261006b">
+<link rel="stylesheet" href="style.css?v=20261006c">
 <style>
 .list{display:flex;flex-direction:column;gap:10px}
 .row{display:grid;grid-template-columns:150px minmax(0,1fr) 170px 112px 132px;gap:12px;align-items:center;background:var(--paper);border:1.5px solid var(--navy);border-left:6px solid var(--navy);border-radius:4px;padding:12px 16px}
@@ -210,7 +210,8 @@
       <p class="hint">客人用手機號碼註冊後會出現在這裡，名字是他自己填的「社團 FB 名字」。確認是同一個人後按「確認綁定」，他就看得到自己的喊單。</p>
       <div id="pendBind"><p class="loading">讀取中…</p></div>
 
-      <h2>所有帳號</h2>
+      <div class="tools" style="margin-top:28px;align-items:center"><h2 style="margin:0">所有帳號</h2>
+        <input id="acctq" class="searchin" type="search" placeholder="搜尋名字、手機或綁定的喊單" aria-label="搜尋帳號" autocomplete="off"></div>
       <p class="hint">把夥伴的帳號設成「夥伴」，他就能看商品和訂貨，但看不到客人資料。手機帳號的客人忘記密碼時，按「重設密碼」幫他設一組新的，再私訊告訴他。</p>
       <div class="tablewrap"><table>
         <thead><tr><th>名字</th><th>手機</th><th>登入方式</th><th>綁定的喊單</th><th>身分</th><th>密碼</th><th>建立日期</th></tr></thead>
@@ -223,7 +224,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=20261006b"></script>
-<script src="admin.js?v=20261006b"></script>
+<script src="config.js?v=20261006c"></script>
+<script src="admin.js?v=20261006c"></script>
 </body>
 </html>
