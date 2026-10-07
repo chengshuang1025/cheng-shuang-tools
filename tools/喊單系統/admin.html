@@ -241,7 +241,7 @@
       </nav>
 
       <div id="rs-rules">
-        <p class="hint">有人留言含有關鍵字（例如「學習單」），系統會先公開回一句「已私訊妳囉」，再私訊對方。勾「要先追蹤」的話，IG 會確認對方真的有追蹤才給連結；FB 粉絲頁沒辦法查，會請對方按讚後按按鈕領取。</p>
+        <p class="hint">有人留言含有關鍵字（例如「學習單」），系統會先公開回一句「已私訊妳囉」，再私訊對方。勾「附上請追蹤的提醒」的話，私訊會在連結後面加一句「記得追蹤／按讚喔」（目前是信任制：Meta 還沒核准讀取一般人私訊的權限，所以先不檢查追蹤，核准後可改回確認追蹤才給）。</p>
         <button class="btn primary" id="ruleNew" type="button" style="margin-bottom:12px">＋ 新增關鍵字規則</button>
         <form id="ruleForm" class="card dashed editor" hidden novalidate>
           <h3 id="ruleFormTitle" style="margin-top:0">新增關鍵字規則</h3>
@@ -251,7 +251,7 @@
             <div class="field span2"><label for="rfCamp">跟哪一團有關（選填）</label><select id="rfCamp"></select></div>
             <div class="field span2"><label for="rfMsg">私訊內容</label><textarea id="rfMsg" rows="3" placeholder="這是答應妳的學習單 🎁 下載後印 A4 就可以玩囉！"></textarea></div>
             <div class="field span2"><label for="rfLink">要送出的連結</label><input class="input" id="rfLink" type="url" placeholder="https://drive.google.com/…"><small>記得先把檔案上傳到雲端、開「知道連結的人都能檢視」再貼上</small></div>
-            <label class="check"><input type="checkbox" id="rfFollow" checked> 要先追蹤才給連結</label>
+            <label class="check"><input type="checkbox" id="rfFollow" checked> 附上請追蹤的提醒</label>
             <label class="check"><input type="checkbox" id="rfActive" checked> 啟用</label>
             <label class="check"><input type="checkbox" id="rfIg" checked> IG</label>
             <label class="check"><input type="checkbox" id="rfFb" checked> FB 粉絲頁</label>
@@ -382,6 +382,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=20261006d"></script>
 <script src="admin.js?v=20261006d"></script>
-<script src="hub.js?v=20261007a"></script>
+<script src="hub.js?v=20261007b"></script>
 </body>
 </html>

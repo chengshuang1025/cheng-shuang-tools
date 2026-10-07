@@ -17,6 +17,10 @@ const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
 type Ctx = { settings: any; conn: any; rules: any[] };
 type Platform = "ig" | "fb";
 
+// 要不要「先確認追蹤才給連結」：Meta 核准 instagram_manage_messages／pages_messaging 進階權限後，
+// 在 Secrets 加 VERIFY_FOLLOW=1 就會改回按鈕＋確認追蹤的流程
+const VERIFY_FOLLOW = Deno.env.get("VERIFY_FOLLOW") === "1";
+
 // ---------- 小工具 ----------
 const norm = (s: string) => String(s || "").toLowerCase().replace(/\s+/g, "");
 const todayTW = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
@@ -145,7 +149,13 @@ async function onComment(p: Platform, c: { id: string; userId: string; userName:
     const rule = matchRule(p, c.text, ctx, oldPost);
     if (rule) {
       let dm: string, button: { title: string; payload: string } | undefined, action: string;
-      if (rule.require_follow) {
+      if (rule.require_follow && !VERIFY_FOLLOW) {
+        // 信任制：直接給連結，附一句請對方追蹤／按讚
+        // （Meta 還沒核准進階權限前，一般人的私訊回覆收不到，按鈕流程會卡住）
+        const ask = p === "ig" ? "喜歡的話記得追蹤 @cheng.shuang1025 喔 🥰 之後還有更多好玩的學習單！" : "喜歡的話記得幫好事丞雙的粉絲頁按個讚喔 🥰 之後還有更多好玩的學習單！";
+        dm = [linkMessage(rule), ask].filter(Boolean).join("\n\n");
+        action = "keyword";
+      } else if (rule.require_follow) {
         dm = p === "ig" ? ctx.settings.follow_prompt : ctx.settings.fb_like_prompt;
         button = { title: ctx.settings.follow_button, payload: `GATE:${rule.id}` };
         action = "gate_wait";
@@ -206,7 +216,7 @@ async function onMessage(p: Platform, m: any, ctx: Ctx) {
       const id0 = await claim({ platform: p, kind: "message", event_id: `${p}:m:${mid}`, user_id: sender, text, rule_id: r.id });
       if (!id0) return;
       try {
-        if (r.require_follow) {
+        if (r.require_follow && VERIFY_FOLLOW) {
           const dm = p === "ig" ? ctx.settings.follow_prompt : ctx.settings.fb_like_prompt;
           await sendDM({ id: sender }, dm, ctx, { title: ctx.settings.follow_button, payload: `GATE:${r.id}` });
           await finish(id0, { action: "gate_wait", reply: dm, status: "done" });

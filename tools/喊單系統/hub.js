@@ -169,7 +169,7 @@
       return `<div class="rcard ${r.active ? "" : "off"}"><div>
         <div class="t">${esc(r.name || r.keywords.join("、"))}${r.active ? "" : "（停用中）"}</div>
         <div>${r.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>
-        <div class="hint" style="margin:2px 0 0">${r.require_follow ? "🔒 要先追蹤" : "直接給連結"}・${r.platforms.map((p) => (p === "ig" ? "IG" : "FB")).join("＋")}${r.all_posts ? "・含舊貼文" : "・只限新貼文"}${camp ? `・${esc(camp.title)}` : ""}${r.link ? "" : `・<span style="color:var(--red)">還沒填連結</span>`}</div>
+        <div class="hint" style="margin:2px 0 0">${r.require_follow ? "💌 附追蹤提醒" : "直接給連結"}・${r.platforms.map((p) => (p === "ig" ? "IG" : "FB")).join("＋")}${r.all_posts ? "・含舊貼文" : "・只限新貼文"}${camp ? `・${esc(camp.title)}` : ""}${r.link ? "" : `・<span style="color:var(--red)">還沒填連結</span>`}</div>
       </div><button class="btn small" type="button" data-rule="${r.id}">編輯</button></div>`;
     }).join("");
   }
