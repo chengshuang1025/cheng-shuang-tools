@@ -3,7 +3,7 @@
 (function () {
   const { esc, toast, errMsg } = GB;
   const FN = GB_CONFIG.url + "/functions/v1/";
-  const H = { camps: [], rules: [], logs: [], settings: null, campFilter: "now", logFilter: "need", sub: "rules", editCamp: null, editRule: null, loaded: {} };
+  const H = { camps: [], rules: [], logs: [], settings: null, campFilter: "now", logFilter: "all", sub: "rules", editCamp: null, editRule: null, loaded: {} };
   const today = () => GB.today();
   const WEEK = "日一二三四五六";
   const dlabel = (d) => { if (!d) return ""; const x = new Date(d + "T00:00:00"); return `${x.getMonth() + 1}/${x.getDate()}（${WEEK[x.getDay()]}）`; };
@@ -99,18 +99,32 @@
     $("campForm").hidden = true; toast("已刪除"); loadCamps();
   };
 
-  // ========== 自動回覆 ==========
+  // ========== 自動回覆（觸發規則／需要妳回／公開回覆庫／紀錄／設定）==========
+  const SRC = { comment: ["💬", "貼文留言"], story: ["📱", "限動回覆"], dm: ["✉️", "私訊"] };
+  const BTN_DEFAULT = "我想更了解這產品！";
+  const toLocal = (iso) => (iso ? GB.tw(iso).slice(0, 16).replace(" ", "T") : "");
+  const fromLocal = (v) => (v ? new Date(v + ":00+08:00").toISOString() : null);
+  const pickOne = (a) => a[Math.floor(Math.random() * a.length)];
+  Object.assign(H, { stats: {}, ruleFilter: "all", edit: null, media: null, mediaErr: "", pvClicked: false, sub: "rules" });
+
   async function loadReply() {
-    const [st, rules, meta] = await Promise.all([
+    const [st, rules, meta, stats] = await Promise.all([
       sb.from("reply_settings").select("*").eq("id", 1).maybeSingle(),
       sb.from("reply_rules").select("*").order("created_at"),
       sb.rpc("meta_status"),
+      sb.rpc("reply_rule_stats"),
     ]);
     if (st.error) return toast(errMsg(st.error));
     H.settings = st.data; H.rules = rules.data || [];
+    H.stats = Object.fromEntries((stats.data || []).map((x) => [x.rule_id, x]));
     if (!H.camps.length) await loadCamps();
-    renderSettings(); renderRules(); renderMeta(meta.data);
+    renderMaster(); renderRules(); renderMeta(meta.data); renderSettings(); renderPool();
     loadLogs();
+  }
+  async function reloadRules() {
+    const [{ data }, stats] = await Promise.all([sb.from("reply_rules").select("*").order("created_at"), sb.rpc("reply_rule_stats")]);
+    H.rules = data || []; H.stats = Object.fromEntries((stats.data || []).map((x) => [x.rule_id, x]));
+    renderRules(); renderPool();
   }
   function renderMeta(m) {
     if (m && m.page_name) {
@@ -120,226 +134,423 @@
       $("metaState").textContent = "還沒連接。按右邊的按鈕，用管理粉絲頁的 Facebook 帳號登入並勾選所有權限。";
     }
   }
-  function renderSettings() {
+  function renderMaster() {
     const s = H.settings; if (!s) return;
-    $("rsEnabled").checked = s.enabled; $("rsIg").checked = s.ig_enabled; $("rsFb").checked = s.fb_enabled; $("rsAi").checked = s.ai_enabled;
-    $("rsSince").value = s.active_since ? GB.tw(s.active_since).slice(0, 16).replace(" ", "T") : "";
-    $("tPublic").value = s.public_reply; $("tPrompt").value = s.follow_prompt; $("tButton").value = s.follow_button;
-    $("tNot").value = s.not_following; $("tFb").value = s.fb_like_prompt; $("tStyle").value = s.ai_style;
-    $("whUrl").textContent = FN + "meta-webhook"; $("whToken").textContent = s.verify_token;
+    $("rsEnabled").checked = s.enabled; $("rsIg").checked = s.ig_enabled; $("rsFb").checked = s.fb_enabled;
+    $("dmFlag").className = "dmflag " + (s.dm_ready ? "on" : "off");
+    $("dmFlag").textContent = s.dm_ready ? "✅ 私訊按鈕、限動、私訊規則運作中" : "⏳ Meta 私訊權限審核中：目前只有貼文留言會動，按鈕先改成直接給";
   }
   async function saveSettings(patch, msg) {
     const { error } = await sb.from("reply_settings").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", 1);
     if (error) { toast(errMsg(error)); return false; }
-    Object.assign(H.settings, patch); if (msg) toast(msg); return true;
+    Object.assign(H.settings, patch); renderMaster(); if (msg) toast(msg); return true;
   }
   $("rsEnabled").onchange = (e) => saveSettings({ enabled: e.target.checked }, e.target.checked ? "自動回覆已開啟" : "自動回覆已暫停");
   $("rsIg").onchange = (e) => saveSettings({ ig_enabled: e.target.checked }, "已儲存");
   $("rsFb").onchange = (e) => saveSettings({ fb_enabled: e.target.checked }, "已儲存");
-  $("rsAi").onchange = (e) => saveSettings({ ai_enabled: e.target.checked }, "已儲存");
-  $("rsSince").onchange = (e) => { const v = e.target.value; saveSettings({ active_since: v ? new Date(v + ":00+08:00").toISOString() : null }, v ? "已儲存：這個時間之前的貼文不自動回覆" : "已儲存：所有貼文都會自動回覆"); };
-  $("rs-texts").onsubmit = (e) => {
-    e.preventDefault();
-    saveSettings({ public_reply: $("tPublic").value.trim(), follow_prompt: $("tPrompt").value.trim(), follow_button: $("tButton").value.trim().slice(0, 20),
-      not_following: $("tNot").value.trim(), fb_like_prompt: $("tFb").value.trim(), ai_style: $("tStyle").value.trim() }, "用語已儲存");
-  };
-  $("replySub").onclick = (e) => {
-    const b = e.target.closest("[data-s]"); if (!b) return;
-    H.sub = b.dataset.s;
-    document.querySelectorAll("#replySub .segbtn").forEach((x) => x.setAttribute("aria-pressed", x.dataset.s === H.sub));
-    ["rules", "log", "texts", "setup"].forEach((k) => { $("rs-" + k).hidden = k !== H.sub; });
-    if (H.sub === "log") loadLogs();
-  };
+
+  function setSub(k) {
+    H.sub = k;
+    document.querySelectorAll("#replySub [data-s]").forEach((x) => x.setAttribute("aria-pressed", x.dataset.s === k));
+    ["rules", "need", "pool", "log", "settings"].forEach((x) => { $("rs-" + x).hidden = x !== k; });
+    $("ruleForm").hidden = true;
+    if (k === "log" || k === "need") loadLogs();
+  }
+  $("replySub").onclick = (e) => { const b = e.target.closest("[data-s]"); if (b) setSub(b.dataset.s); };
   document.addEventListener("click", (e) => {
     const b = e.target.closest("[data-copy]"); if (!b) return;
     navigator.clipboard.writeText($(b.dataset.copy).textContent).then(() => toast("已複製"));
   });
 
-  // 規則
+  // ---------- 觸發規則列表 ----------
+  const RULE_FILTERS = [["all", "全部"], ["comment", "💬 貼文留言"], ["story", "📱 限動回覆"], ["dm", "✉️ 私訊"], ["archived", "🗄 已封存"]];
+  function thumbHtml(r) {
+    if (r.post_id && r.post_thumb) return `<img src="${esc(r.post_thumb)}" alt="" loading="lazy" onerror="this.replaceWith(document.createTextNode('${r.source === "story" ? "那則限動" : "那篇貼文"}'))">`;
+    if (r.post_id) return r.source === "story" ? "那則限動" : "那篇貼文";
+    return r.source === "story" ? "全部限動" : r.source === "dm" ? "私訊" : "全部貼文";
+  }
+  function renderRules() {
+    const live = H.rules.filter((r) => !r.archived);
+    const cnt = { all: live.length, archived: H.rules.length - live.length };
+    live.forEach((r) => { cnt[r.source || "comment"] = (cnt[r.source || "comment"] || 0) + 1; });
+    $("ruleFilters").innerHTML = RULE_FILTERS.map(([k, l]) => `<button class="chipbtn" type="button" data-rf="${k}" aria-pressed="${H.ruleFilter === k}">${l}<span class="n">${cnt[k] || 0}</span></button>`).join("");
+    const list = H.ruleFilter === "archived" ? H.rules.filter((r) => r.archived) : live.filter((r) => H.ruleFilter === "all" || (r.source || "comment") === H.ruleFilter);
+    if (!list.length) {
+      $("ruleGrid").innerHTML = `<div class="rc" style="grid-column:1/-1"><p class="hint" style="margin:0">${H.ruleFilter === "archived" ? "沒有封存的規則。" : "這裡還沒有規則。按右上角「＋ 新增規則」，例如：留言「草莓」→ 公開回一句 → 私訊招呼＋『我想更了解這產品！』按鈕。"}</p></div>`;
+      return;
+    }
+    const now = Date.now();
+    $("ruleGrid").innerHTML = list.map((r) => {
+      const s = H.stats[r.id] || {}, src = r.source || "comment";
+      const waitDm = src !== "comment" && !H.settings?.dm_ready;
+      const tags = [
+        `<span class="tg">${SRC[src][1]}</span>`,
+        r.platforms.length === 2 ? "" : `<span class="tg">${r.platforms[0] === "ig" ? "IG" : "FB"}</span>`,
+        r.mode === "button" ? `<span class="tg">按鈕後給</span>` : `<span class="tg g">直接給連結</span>`,
+        r.allow_repeat ? `<span class="tg r">🧪 可重複觸發</span>` : "",
+        !r.active ? `<span class="tg w">⏸ 暫停中</span>` : "",
+        r.ends_at && Date.parse(r.ends_at) < now ? `<span class="tg w">已過期</span>` : r.starts_at && Date.parse(r.starts_at) > now ? `<span class="tg y">⏰ ${GB.tw(r.starts_at).slice(5, 16)} 開始</span>` : "",
+        waitDm ? `<span class="tg y">等 Meta 核准</span>` : "",
+      ].join("");
+      const rate = r.mode === "button" && s.greeted ? Math.round((s.clicks / s.greeted) * 100) + "%" : "—";
+      return `<div class="rc ${r.active && !r.archived ? "" : "off"}">
+        <div class="top"><div class="thumb">${thumbHtml(r)}</div>
+          <div style="min-width:0"><div class="t">${esc(r.name || r.keywords.join("、") || "（未命名）")}</div><div class="tags">${tags}</div></div></div>
+        <div class="kwl">關鍵字：${r.any_text ? (src === "dm" ? "任何私訊" : "任何內容") : esc(r.keywords.join("、")) + (r.fuzzy ? " <small>（含同音字）</small>" : "")}</div>
+        <div class="st"><span>觸發 <b>${s.triggered || 0}</b></span><span>已送 <b>${s.sent || 0}</b></span><span title="按了按鈕的人數 ÷ 收到按鈕的人數">點擊率 <b>${rate}</b></span></div>
+        ${s.errors ? `<div class="bad">⚠️ 有 ${s.errors} 筆送出失敗，到「紀錄」看原因</div>` : ""}
+        <div class="acts">
+          ${r.archived ? `<button class="btn small" type="button" data-ra="unarchive" data-id="${r.id}">還原</button>` : `<button class="btn small" type="button" data-ra="toggle" data-id="${r.id}">${r.active ? "暫停" : "啟用"}</button>`}
+          <button class="btn small" type="button" data-ra="copy" data-id="${r.id}">複製</button>
+          <button class="btn small" type="button" data-ra="edit" data-id="${r.id}">編輯</button>
+          ${r.archived ? "" : `<button class="btn small" type="button" data-ra="archive" data-id="${r.id}">封存</button>`}
+          <button class="btn small red" type="button" data-ra="delete" data-id="${r.id}">刪除</button>
+        </div></div>`;
+    }).join("");
+  }
+  $("ruleFilters").onclick = (e) => { const b = e.target.closest("[data-rf]"); if (b) { H.ruleFilter = b.dataset.rf; renderRules(); } };
+  $("ruleGrid").onclick = async (e) => {
+    const b = e.target.closest("[data-ra]"); if (!b) return;
+    const r = H.rules.find((x) => x.id === +b.dataset.id); if (!r) return;
+    const upd = async (patch, msg) => { const { error } = await sb.from("reply_rules").update(patch).eq("id", r.id); if (error) return toast(errMsg(error)); toast(msg); reloadRules(); };
+    switch (b.dataset.ra) {
+      case "toggle": return upd({ active: !r.active }, r.active ? "已暫停" : "已啟用");
+      case "archive": return upd({ archived: true, active: false }, "已封存（在「🗄 已封存」裡可以還原）");
+      case "unarchive": return upd({ archived: false }, "已還原，記得按「啟用」");
+      case "edit": return openRule(r);
+      case "copy": {
+        const { id, created_at, ...rest } = r;
+        const { error } = await sb.from("reply_rules").insert({ ...rest, name: (r.name || "規則") + "（複製）", active: false, archived: false });
+        if (error) return toast(errMsg(error));
+        toast("已複製（先暫停，改好再啟用）"); return reloadRules();
+      }
+      case "delete": {
+        if (!confirm(`確定要刪除「${r.name || r.keywords.join("、")}」嗎？\n（只是先不用的話，可以按「封存」）`)) return;
+        const { error } = await sb.from("reply_rules").delete().eq("id", r.id);
+        if (error) return toast(errMsg(error));
+        toast("已刪除"); return reloadRules();
+      }
+    }
+  };
+
+  // ---------- 規則編輯 ----------
+  function blankRule() {
+    return { name: "", source: "comment", platforms: ["ig", "fb"], post_id: null, post_thumb: "", post_caption: "", keywords: [], fuzzy: true, any_text: false,
+      public_replies: [], mode: "button", greeting: "", button_label: BTN_DEFAULT, message: "", link_buttons: [], follow_invite: true,
+      starts_at: null, ends_at: null, allow_repeat: false, all_posts: false, campaign_id: null, active: true };
+  }
   function fillCampSelect() {
     if (!$("rfCamp")) return;
     const cur = $("rfCamp").value;
     $("rfCamp").innerHTML = `<option value="">（不指定）</option>` + H.camps.map((c) => `<option value="${c.id}">${esc(c.title)}</option>`).join("");
     $("rfCamp").value = cur;
   }
-  function renderRules() {
-    if (!H.rules.length) { $("ruleList").innerHTML = `<div class="card"><p class="hint" style="margin:0">還沒有關鍵字規則。例如新增一條「學習單」：有人留言「學習單」，確認追蹤後就私訊下載連結給他。</p></div>`; return; }
-    $("ruleList").innerHTML = H.rules.map((r) => {
-      const camp = H.camps.find((c) => c.id === r.campaign_id);
-      return `<div class="rcard ${r.active ? "" : "off"}"><div>
-        <div class="t">${esc(r.name || r.keywords.join("、"))}${r.active ? "" : "（停用中）"}</div>
-        <div>${r.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>
-        <div class="hint" style="margin:2px 0 0">${r.require_follow ? "🔒 要追蹤才給" : "直接給"}${menuCount(r.menu) ? `・💬 ${menuCount(r.menu)} 個按鈕${menuLocks(r.menu) ? `（${menuLocks(r.menu)} 個要追蹤）` : ""}` : ""}・${r.platforms.map((p) => (p === "ig" ? "IG" : "FB")).join("＋")}${r.all_posts ? "・含舊貼文" : "・只限新貼文"}${camp ? `・${esc(camp.title)}` : ""}${r.link || menuCount(r.menu) ? "" : `・<span style="color:var(--red)">還沒填連結</span>`}</div>
-      </div><button class="btn small" type="button" data-rule="${r.id}">編輯</button></div>`;
-    }).join("");
-  }
-  $("ruleList").onclick = (e) => { const b = e.target.closest("[data-rule]"); if (b) openRule(H.rules.find((r) => r.id === +b.dataset.rule)); };
-  $("ruleNew").onclick = () => openRule(null);
-  $("ruleCancel").onclick = () => { $("ruleForm").hidden = true; };
   function openRule(r) {
-    H.editRule = r ? r.id : null;
+    const d = r ? JSON.parse(JSON.stringify(r)) : blankRule();
+    if (!d.source) d.source = "comment";
+    if (!Array.isArray(d.link_buttons)) d.link_buttons = [];
+    if (d.link) { d.link_buttons.push({ title: "🔗 點我打開", url: d.link }); d.link = ""; }
+    H.edit = d; H.editId = r ? r.id : null; H.pvClicked = false;
     fillCampSelect();
-    $("ruleFormTitle").textContent = r ? "編輯關鍵字規則" : "新增關鍵字規則";
-    $("rfName").value = r?.name || ""; $("rfKeys").value = (r?.keywords || []).join(", ");
-    $("rfCamp").value = r?.campaign_id || ""; $("rfMsg").value = r?.message || ""; $("rfLink").value = r?.link || "";
-    $("rfFollow").checked = r ? r.require_follow : true; $("rfActive").checked = r ? r.active : true;
-    $("rfIg").checked = r ? r.platforms.includes("ig") : true; $("rfFb").checked = r ? r.platforms.includes("fb") : true; $("rfAll").checked = !!r?.all_posts;
+    $("ruleFormTitle").textContent = r ? "編輯規則" : "新增規則";
+    $("rfName").value = d.name || ""; $("rfKeys").value = (d.keywords || []).join(", ");
+    $("rfFuzzy").checked = d.fuzzy !== false; $("rfAny").checked = !!d.any_text;
+    $("rfIg").checked = d.platforms.includes("ig"); $("rfFb").checked = d.platforms.includes("fb");
+    $("rfGreet").value = d.greeting || ""; $("rfGreet").placeholder = H.settings?.default_greeting || "";
+    $("rfBtn").value = d.button_label || BTN_DEFAULT; $("rfMsg").value = d.message || ""; $("rfInvite").checked = d.follow_invite !== false;
+    $("rfStart").value = toLocal(d.starts_at); $("rfEnd").value = toLocal(d.ends_at);
+    $("rfCamp").value = d.campaign_id || ""; $("rfAll").checked = !!d.all_posts; $("rfRepeat").checked = !!d.allow_repeat;
+    $("rfAdv").open = !!(d.starts_at || d.ends_at || d.allow_repeat || d.all_posts || d.campaign_id);
+    $("rfActive").checked = d.active !== false; $("rfActiveTxt").textContent = $("rfActive").checked ? "開啟中" : "暫停中";
     $("ruleDel").hidden = !r; $("ruleErr").hidden = true;
-    H.menu = JSON.parse(JSON.stringify(r?.menu || [])); H.pv = "root"; renderMenu();
-    $("ruleForm").hidden = false; $("rfKeys").focus();
+    $("rs-rules").hidden = true; $("ruleForm").hidden = false;
+    renderSource(); renderPub(); renderLinks(); renderMode();
+    $("ruleForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    if (d.source !== "dm" && !H.media) loadMedia(); else renderPicker();
   }
+  function closeRule() { $("ruleForm").hidden = true; $("rs-rules").hidden = false; H.edit = null; }
+  $("ruleNew").onclick = () => openRule(null);
+  $("ruleBack").onclick = closeRule; $("ruleCancel").onclick = closeRule;
+  $("rfActive").onchange = (e) => { $("rfActiveTxt").textContent = e.target.checked ? "開啟中" : "暫停中"; };
+
+  function pressSeg(id, v) { document.querySelectorAll(`#${id} [data-v]`).forEach((b) => b.setAttribute("aria-pressed", b.dataset.v === v)); }
+  function renderSource() {
+    const d = H.edit, src = d.source;
+    pressSeg("rfSource", src);
+    $("rfFbWrap").hidden = src === "story";
+    if (src === "story") { $("rfIg").checked = true; $("rfFb").checked = false; }
+    $("rfPostWrap").hidden = src === "dm";
+    $("rfPostLabel").textContent = src === "story" ? "哪一則限動（限動 24 小時後就看不到，選「全部限動」比較方便）" : "哪一篇貼文";
+    $("rfAnyTxt").textContent = src === "dm" ? "不用關鍵字，有私訊就回" : src === "story" ? "不用關鍵字，有回覆就回" : "不用關鍵字，有留言就回";
+    $("rfAnyWarn").hidden = !(src === "dm" && $("rfAny").checked);
+    $("rfPubStep").hidden = src !== "comment"; $("rfDmNo").textContent = src === "comment" ? "3" : "2";
+    $("rfAllWrap").hidden = src !== "comment";
+    renderPicker(); renderPreview();
+  }
+  $("rfSource").onclick = (e) => {
+    const b = e.target.closest("[data-v]"); if (!b || H.edit.source === b.dataset.v) return;
+    H.edit.source = b.dataset.v; H.edit.post_id = null; H.edit.post_thumb = ""; H.edit.post_caption = "";
+    if (b.dataset.v !== "story" && !$("rfFb").checked && !$("rfIg").checked) $("rfIg").checked = true;
+    renderSource();
+    if (b.dataset.v !== "dm" && !H.media) loadMedia();
+  };
+  $("rfAny").onchange = () => { $("rfAnyWarn").hidden = !(H.edit.source === "dm" && $("rfAny").checked); };
+  ["rfIg", "rfFb"].forEach((id) => $(id).addEventListener("change", () => {
+    // 挑了某一篇但把那個平台取消勾 → 改回全部
+    const sel = H.edit.post_id && (H.media?.ig || []).concat(H.media?.fb || []).find((m) => m.id === H.edit.post_id);
+    if (sel && !$(sel.p === "ig" ? "rfIg" : "rfFb").checked) { H.edit.post_id = null; H.edit.post_thumb = ""; H.edit.post_caption = ""; }
+    renderPicker();
+  }));
+
+  // 挑貼文
+  async function loadMedia() {
+    if (!H.settings?.verify_token) return;
+    $("rfPicker").innerHTML = `<p class="loading">讀取貼文中…</p>`;
+    try {
+      const r = await fetch(`${FN}meta-webhook?hub.mode=media&hub.verify_token=${encodeURIComponent(H.settings.verify_token)}`);
+      const j = await r.json();
+      if (j.error) throw new Error(j.error);
+      H.media = { ig: (j.ig || []).map((m) => ({ ...m, p: "ig" })), fb: (j.fb || []).map((m) => ({ ...m, p: "fb" })), stories: (j.stories || []).map((m) => ({ ...m, p: "ig" })) };
+      H.mediaErr = [j.ig_error && "IG 貼文", j.fb_error && "FB 貼文", j.stories_error && "IG 限動"].filter(Boolean).join("、");
+    } catch (e) { H.media = null; H.mediaErr = "讀不到貼文（" + (e.message || e) + "）"; }
+    renderPicker();
+  }
+  $("rfReload").onclick = loadMedia;
+  function renderPicker() {
+    const d = H.edit; if (!d || d.source === "dm") return;
+    const story = d.source === "story";
+    let items = [];
+    if (H.media) items = story ? H.media.stories : [...($("rfIg").checked ? H.media.ig : []), ...($("rfFb").checked ? H.media.fb : [])].sort((a, b) => String(b.time).localeCompare(String(a.time)));
+    if (d.post_id && !items.some((m) => m.id === d.post_id)) items.unshift({ id: d.post_id, thumb: d.post_thumb, caption: d.post_caption || "（之前選的）", p: d.platforms[0] });
+    const all = `<button type="button" class="pk" data-pid="" aria-pressed="${!d.post_id}"><span class="im">${story ? "全部限動" : "全部貼文"}</span><span class="cap">不限定</span></button>`;
+    const cards = items.map((m) => `<button type="button" class="pk" data-pid="${esc(m.id)}" aria-pressed="${d.post_id === m.id}" title="${esc(m.caption)}">
+      <span class="im">${m.thumb ? `<img src="${esc(m.thumb)}" alt="" loading="lazy">` : esc((m.caption || "").slice(0, 24) || "（沒有圖）")}${story ? "" : `<span class="pf">${m.p === "ig" ? "IG" : "FB"}</span>`}</span>
+      <span class="cap">${esc(m.caption || (m.time ? GB.tw(m.time).slice(5, 16) : ""))}</span></button>`).join("");
+    const note = !H.media ? `<p class="hint" style="grid-column:1/-1;margin:4px">${esc(H.mediaErr || "讀取貼文中…")}</p>`
+      : H.mediaErr ? `<p class="hint" style="grid-column:1/-1;margin:4px">⚠️ ${esc(H.mediaErr)}讀取失敗，可以按「重新讀取」</p>`
+      : story && !items.length ? `<p class="hint" style="grid-column:1/-1;margin:4px">現在沒有 24 小時內的限動。</p>` : "";
+    $("rfPicker").innerHTML = all + cards + note;
+  }
+  $("rfPicker").onclick = (e) => {
+    const b = e.target.closest("[data-pid]"); if (!b) return;
+    const d = H.edit, id = b.dataset.pid;
+    if (!id) { d.post_id = null; d.post_thumb = ""; d.post_caption = ""; }
+    else {
+      const m = [...(H.media?.ig || []), ...(H.media?.fb || []), ...(H.media?.stories || [])].find((x) => x.id === id) || { id, thumb: d.post_thumb, caption: d.post_caption, p: d.platforms[0] };
+      d.post_id = m.id; d.post_thumb = m.thumb || ""; d.post_caption = (m.caption || "").slice(0, 120);
+      $("rfIg").checked = m.p === "ig"; $("rfFb").checked = m.p === "fb";
+    }
+    renderPicker();
+  };
+
+  // 公開回一句
+  function renderPub() {
+    const d = H.edit, pool = H.settings?.public_pool || [];
+    const extra = (d.public_replies || []).filter((t) => !pool.includes(t));
+    const all = [...pool, ...extra];
+    $("rfPub").innerHTML = all.length ? all.map((t, i) => `<label class="check"><input type="checkbox" data-pub="${i}" ${d.public_replies.includes(t) ? "checked" : ""}> ${esc(t)}</label>`).join("")
+      : `<p class="hint">公開回覆庫是空的，到「💬 公開回覆庫」新增幾句。</p>`;
+    $("rfPub").dataset.all = JSON.stringify(all);
+  }
+  $("rfPub").onchange = () => {
+    const all = JSON.parse($("rfPub").dataset.all || "[]");
+    H.edit.public_replies = [...$("rfPub").querySelectorAll("[data-pub]:checked")].map((c) => all[+c.dataset.pub]);
+    renderPreview();
+  };
+
+  // 私訊方式、連結按鈕
+  function renderMode() {
+    const m = H.edit.mode;
+    pressSeg("rfMode", m);
+    $("rfGreetBox").hidden = m !== "button";
+    $("rfModeWarn").hidden = !(m === "button" && !H.settings?.dm_ready);
+    $("rfMsgLabel").textContent = m === "button" ? "客人按了按鈕後收到的內容" : "客人會收到的內容";
+    renderPreview();
+  }
+  $("rfMode").onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) { H.edit.mode = b.dataset.v; H.pvClicked = false; renderMode(); } };
+  $("rfBtnPresets").onclick = (e) => { const b = e.target.closest("[data-p]"); if (b) { $("rfBtn").value = b.dataset.p; renderPreview(); } };
+  function renderLinks() {
+    const L = H.edit.link_buttons;
+    $("rfLinks").innerHTML = L.map((b, i) => `<div class="lk"><input class="input" data-li="${i}" data-k="title" maxlength="20" value="${esc(b.title)}" placeholder="按鈕字，例如：🛒 團購連結" aria-label="按鈕上的字">
+      <input class="input" data-li="${i}" data-k="url" type="url" value="${esc(b.url)}" placeholder="https://…" aria-label="網址"><button type="button" data-lrm="${i}" aria-label="拿掉這顆">✕</button></div>`).join("");
+    $("rfLinkAdd").hidden = L.length >= 3;
+    renderPreview();
+  }
+  $("rfLinkAdd").onclick = () => { H.edit.link_buttons.push({ title: "", url: "" }); renderLinks(); const ins = $("rfLinks").querySelectorAll('[data-k="title"]'); ins[ins.length - 1]?.focus(); };
+  $("rfLinks").addEventListener("input", (e) => { const i = e.target.dataset.li; if (i === undefined) return; H.edit.link_buttons[+i][e.target.dataset.k] = e.target.value; renderPreview(); });
+  $("rfLinks").addEventListener("click", (e) => { const b = e.target.closest("[data-lrm]"); if (b) { H.edit.link_buttons.splice(+b.dataset.lrm, 1); renderLinks(); } });
+  ["rfGreet", "rfBtn", "rfMsg", "rfInvite", "rfIg", "rfFb"].forEach((id) => $(id).addEventListener("input", renderPreview));
+  $("rfInvite").addEventListener("change", renderPreview);
+
+  // 預覽：客人會看到
+  function renderPreview() {
+    const d = H.edit; if (!d) return;
+    const s = H.settings || {};
+    const ig = $("rfIg").checked || d.source === "story";
+    const invite = $("rfInvite").checked ? (ig ? s.invite_ig : s.invite_fb) : "";
+    const content = [$("rfMsg").value.trim(), invite].filter(Boolean).join("\n\n");
+    const links = d.link_buttons.filter((b) => b.title || b.url);
+    const card = (text, btns) => `<div class="card2"><div class="tx">${esc(text) || '<span style="color:#999">（還沒寫內容）</span>'}</div>${btns.join("")}</div>`;
+    let h = "";
+    if (d.source === "comment") {
+      h += `<div class="sec">💬 妳在留言底下回（每次隨機挑一句）</div>`;
+      h += d.public_replies.length ? `<div class="bub pub">${esc(pickOne(d.public_replies))}</div>` : `<div class="bub pub empty">（沒有勾公開回覆）</div>`;
+    }
+    const btnMode = d.mode === "button";
+    h += `<div class="sec">✉️ 私訊${btnMode ? "（觸發後先收到招呼）" : "（觸發後直接收到）"}</div>`;
+    if (btnMode) {
+      const label = $("rfBtn").value.trim() || BTN_DEFAULT;
+      h += card($("rfGreet").value.trim() || s.default_greeting || "", [`<button type="button" class="cb" data-pvclick>${esc(label)}</button>`]);
+      if (H.pvClicked) {
+        h += `<div class="bub me">${esc(label)}</div>`;
+        h += card(content, links.map((b) => `<span class="cb">${esc(b.title || "🔗 連結")}</span>`));
+      } else h += `<div class="sec">↑ 點按鈕看看客人按了之後收到什麼</div>`;
+      if (!s.dm_ready) h += `<div class="sec">⏳ Meta 核准前：客人會跳過按鈕這一步，直接收到「按了之後」的那則內容</div>`;
+    } else {
+      h += card(content, links.map((b) => `<span class="cb">${esc(b.title || "🔗 連結")}</span>`));
+    }
+    h += `<div class="sec">卡片文字最多 640 字，太長會改成純文字＋網址。</div>`;
+    $("rfPreview").innerHTML = h;
+  }
+  $("rfPreview").onclick = (e) => { if (e.target.closest("[data-pvclick]")) { H.pvClicked = !H.pvClicked; renderPreview(); } };
+
   $("ruleForm").onsubmit = async (e) => {
     e.preventDefault();
+    const d = H.edit;
+    const links = d.link_buttons.map((b) => ({ title: (b.title || "").trim().slice(0, 20), url: (b.url || "").trim() })).filter((b) => b.title || b.url);
     const row = {
-      name: $("rfName").value.trim(), keywords: commas($("rfKeys").value),
-      campaign_id: $("rfCamp").value ? +$("rfCamp").value : null,
-      message: $("rfMsg").value.trim(), link: $("rfLink").value.trim(),
-      require_follow: $("rfFollow").checked, active: $("rfActive").checked, all_posts: $("rfAll").checked,
-      platforms: [$("rfIg").checked && "ig", $("rfFb").checked && "fb"].filter(Boolean),
-      menu: cleanMenu(H.menu),
+      name: $("rfName").value.trim(), source: d.source, keywords: commas($("rfKeys").value), fuzzy: $("rfFuzzy").checked, any_text: $("rfAny").checked,
+      platforms: d.source === "story" ? ["ig"] : [$("rfIg").checked && "ig", $("rfFb").checked && "fb"].filter(Boolean),
+      post_id: d.source === "dm" ? null : d.post_id, post_thumb: d.source === "dm" ? "" : d.post_thumb || "", post_caption: d.source === "dm" ? "" : d.post_caption || "",
+      public_replies: d.source === "comment" ? d.public_replies : [],
+      mode: d.mode, greeting: $("rfGreet").value.trim(), button_label: ($("rfBtn").value.trim() || BTN_DEFAULT).slice(0, 20),
+      message: $("rfMsg").value.trim(), link: "", link_buttons: links, follow_invite: $("rfInvite").checked,
+      starts_at: fromLocal($("rfStart").value), ends_at: fromLocal($("rfEnd").value),
+      allow_repeat: $("rfRepeat").checked, all_posts: $("rfAll").checked, campaign_id: $("rfCamp").value ? +$("rfCamp").value : null,
+      active: $("rfActive").checked, require_follow: false,
     };
-    const bad = !row.keywords.length ? "請至少填一個關鍵字" : !row.platforms.length ? "請至少勾一個平台" : row.link && !/^https?:\/\//i.test(row.link) ? "連結要以 https:// 開頭" : !row.link && !row.message && !row.menu.length ? "請填私訊內容、連結，或加按鈕" : menuProblem(row.menu);
+    const bad = !row.any_text && !row.keywords.length ? "請填關鍵字，或勾「不用關鍵字」"
+      : !row.platforms.length ? "請至少勾一個平台"
+      : links.some((b) => !b.title) ? "連結按鈕要寫按鈕上的字"
+      : links.some((b) => !/^https?:\/\//i.test(b.url)) ? "連結按鈕的網址要以 https:// 開頭"
+      : !row.message && !links.length ? "請寫客人會收到的內容，或加連結按鈕"
+      : row.starts_at && row.ends_at && row.starts_at > row.ends_at ? "結束時間要在開始之後" : "";
     if (bad) { $("ruleErr").textContent = bad; $("ruleErr").hidden = false; return; }
-    const { error } = H.editRule ? await sb.from("reply_rules").update(row).eq("id", H.editRule) : await sb.from("reply_rules").insert(row);
+    const { error } = H.editId ? await sb.from("reply_rules").update(row).eq("id", H.editId) : await sb.from("reply_rules").insert(row);
     if (error) { $("ruleErr").textContent = errMsg(error); $("ruleErr").hidden = false; return; }
-    $("ruleForm").hidden = true; toast("規則已儲存");
-    const { data } = await sb.from("reply_rules").select("*").order("created_at"); H.rules = data || []; renderRules();
+    toast("規則已儲存"); closeRule(); reloadRules();
   };
   $("ruleDel").onclick = async () => {
-    if (!confirm("確定要刪除這條規則嗎？")) return;
-    const { error } = await sb.from("reply_rules").delete().eq("id", H.editRule);
+    if (!confirm("確定要刪除這條規則嗎？（只是先不用的話，可以在列表按「封存」）")) return;
+    const { error } = await sb.from("reply_rules").delete().eq("id", H.editId);
     if (error) return toast(errMsg(error));
-    $("ruleForm").hidden = true; H.rules = H.rules.filter((r) => r.id !== H.editRule); renderRules(); toast("已刪除");
+    toast("已刪除"); closeRule(); reloadRules();
   };
 
-
-  // ========== 私訊按鈕選單編輯器（像 ManyChat）==========
-  const MAX_DEPTH = 3, MAX_BTN = 10;
-  const HOME = "🏠 回主選單";
-  H.menu = []; H.pv = "root";
-  const newNode = () => ({ id: "b" + Math.random().toString(36).slice(2, 8), title: "", text: "", link: "", follow: false, children: [] });
-  const menuCount = (ns = []) => ns.reduce((a, n) => a + 1 + menuCount(n.children), 0);
-  const menuLocks = (ns = []) => ns.reduce((a, n) => a + (n.follow ? 1 : 0) + menuLocks(n.children), 0);
-  function locate(id, list = H.menu) {
-    for (let i = 0; i < list.length; i++) {
-      if (list[i].id === id) return { node: list[i], list, i };
-      const hit = locate(id, list[i].children || []);
-      if (hit) return hit;
+  // ---------- 公開回覆庫 ----------
+  function renderPool() {
+    const pool = H.settings?.public_pool || [];
+    const used = (t) => H.rules.filter((r) => (r.public_replies || []).includes(t)).length;
+    $("poolList").innerHTML = pool.length ? pool.map((t, i) => `<div class="prow"><input class="input" data-pool="${i}" value="${esc(t)}" aria-label="公開回覆第 ${i + 1} 句">
+      <span class="used">${used(t) ? `用在 ${used(t)} 條規則` : "沒在用"}</span><button class="btn small red" type="button" data-pdel="${i}">刪除</button></div>`).join("")
+      : `<p class="hint">還沒有句子，在下面新增。</p>`;
+  }
+  async function replaceInRules(oldT, newT) {
+    const hits = H.rules.filter((r) => (r.public_replies || []).includes(oldT));
+    for (const r of hits) {
+      const list = r.public_replies.map((t) => (t === oldT ? newT : t)).filter((t) => t !== null);
+      await sb.from("reply_rules").update({ public_replies: list }).eq("id", r.id);
+      r.public_replies = list;
     }
-    return null;
   }
-  function cleanMenu(ns = []) {
-    return ns.map((n) => ({ id: n.id, title: (n.title || "").trim().slice(0, 20), text: (n.text || "").trim(), link: (n.link || "").trim(), follow: !!n.follow, children: cleanMenu(n.children) }));
-  }
-  function menuProblem(ns, depth = 1) {
-    const seen = new Set();
-    for (const n of ns) {
-      if (!n.title) return `第 ${depth} 層有按鈕還沒寫按鈕上的字`;
-      if (seen.has(n.title)) return `同一層有兩個「${n.title}」按鈕，請改成不同的字`;
-      seen.add(n.title);
-      if (n.link && !/^https?:\/\//i.test(n.link)) return `「${n.title}」的連結要以 https:// 開頭`;
-      if (!n.text && !n.link && !n.children.length) return `「${n.title}」還沒填私訊內容、連結或下一層按鈕`;
-      const sub = menuProblem(n.children, depth + 1);
-      if (sub) return sub;
-    }
-    return "";
-  }
-  function treeHtml(ns, depth) {
-    return ns.map((n, i) => `<div class="mnode" data-mid="${n.id}">
-      <div class="mhead"><span class="mtag">${depth === 1 ? "按鈕" : `第 ${depth} 層`}</span>
-        <input class="input" data-k="title" maxlength="20" value="${esc(n.title)}" placeholder="按鈕上的字，例如：📝 領學習單" aria-label="按鈕上的字">
-        <button class="micon" type="button" data-mv="${n.id}" title="往上移" aria-label="往上移" ${i ? "" : "disabled"}>↑</button>
-        <button class="micon" type="button" data-rm="${n.id}" title="刪除這個按鈕" aria-label="刪除這個按鈕">✕</button></div>
-      <textarea data-k="text" rows="2" placeholder="粉絲點了之後，私訊的內容" aria-label="私訊內容">${esc(n.text)}</textarea>
-      <input class="input" data-k="link" type="url" value="${esc(n.link)}" placeholder="要送出的連結（選填）https://…" aria-label="連結">
-      <div class="mfoot"><label class="check"><input type="checkbox" data-k="follow" ${n.follow ? "checked" : ""}> 🔒 要追蹤才給</label>
-        ${depth < MAX_DEPTH ? `<button class="btn small" type="button" data-sub="${n.id}" ${(n.children || []).length >= MAX_BTN ? "disabled" : ""}>＋ 下一層按鈕</button>` : ""}</div>
-      ${(n.children || []).length ? `<div class="mkids">${treeHtml(n.children, depth + 1)}</div>` : ""}
-    </div>`).join("");
-  }
-  function renderMenu() {
-    $("menuTree").innerHTML = H.menu.length ? treeHtml(H.menu, 1) : `<p class="hint" style="margin:0">還沒有按鈕。只要直接送私訊內容和連結的話，這裡空著就好。</p>`;
-    $("menuAdd").disabled = H.menu.length >= MAX_BTN;
-    renderPreview();
-  }
-  function addTo(list) {
-    const n = newNode(); list.push(n); renderMenu();
-    const box = document.querySelector(`[data-mid="${n.id}"] [data-k="title"]`); if (box) box.focus();
-  }
-  $("menuAdd").onclick = () => addTo(H.menu);
-  $("menuTree").addEventListener("input", (e) => {
-    const k = e.target.dataset.k; if (!k) return;
-    const hit = locate(e.target.closest(".mnode").dataset.mid); if (!hit) return;
-    hit.node[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
-    renderPreview();
+  $("poolList").addEventListener("change", async (e) => {
+    const i = e.target.dataset.pool; if (i === undefined) return;
+    const pool = [...H.settings.public_pool], oldT = pool[+i], newT = e.target.value.trim();
+    if (!newT || newT === oldT) { e.target.value = oldT; return; }
+    pool[+i] = newT;
+    if (await saveSettings({ public_pool: pool })) { await replaceInRules(oldT, newT); renderPool(); toast("已更新"); }
   });
-  $("menuTree").addEventListener("click", (e) => {
-    const sub = e.target.closest("[data-sub]"), rm = e.target.closest("[data-rm]"), mv = e.target.closest("[data-mv]");
-    if (sub) { const h = locate(sub.dataset.sub); h.node.children = h.node.children || []; addTo(h.node.children); }
-    if (rm) {
-      const h = locate(rm.dataset.rm);
-      if (h.node.children?.length && !confirm(`「${h.node.title || "這個按鈕"}」底下還有 ${menuCount(h.node.children)} 個按鈕，要一起刪除嗎？`)) return;
-      h.list.splice(h.i, 1); if (locate(H.pv) === null) H.pv = "root"; renderMenu();
-    }
-    if (mv) { const h = locate(mv.dataset.mv); if (h.i) { [h.list[h.i - 1], h.list[h.i]] = [h.list[h.i], h.list[h.i - 1]]; renderMenu(); } }
+  $("poolList").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-pdel]"); if (!b) return;
+    const pool = [...H.settings.public_pool], t = pool[+b.dataset.pdel];
+    const n = H.rules.filter((r) => (r.public_replies || []).includes(t)).length;
+    if (n && !confirm(`這句用在 ${n} 條規則，刪除後那些規則就不會再用這句。確定刪除？`)) return;
+    pool.splice(+b.dataset.pdel, 1);
+    if (await saveSettings({ public_pool: pool })) { await replaceInRules(t, null); renderPool(); toast("已刪除"); }
   });
-  // 預覽：像手機私訊畫面
-  function renderPreview() {
-    const box = $("menuPreview"); if (!box) return;
-    const at = H.pv === "root" ? null : locate(H.pv)?.node;
-    if (H.pv !== "root" && !at) H.pv = "root";
-    const bub = (cls, t) => `<div class="bub ${cls}">${esc(t)}</div>`;
-    let html = "", chips;
-    if (!at) {
-      const start = [$("rfMsg").value.trim(), $("rfLink").value.trim()].filter(Boolean).join("\n\n") || (H.menu.length ? "請選擇妳想要的 👇" : "（還沒有私訊內容）");
-      if ($("rfFollow").checked) html += bub("lock", "🔒 先請對方追蹤，確認後才送出 ↓");
-      html += bub("page", start);
-      chips = H.menu.filter((n) => n.title);
-    } else {
-      html += bub("me", at.title || "（按鈕）");
-      if (at.follow) html += bub("lock", "🔒 先確認有追蹤，才送出 ↓");
-      html += bub("page", [at.text, at.link].filter(Boolean).join("\n\n") || at.title);
-      chips = (at.children || []).filter((n) => n.title);
-    }
-    const qr = chips.map((n) => `<button class="qr" type="button" data-pv="${n.id}">${esc(n.title)}</button>`).join("")
-      || (at ? `<button class="qr" type="button" data-pv="root">${HOME}</button>` : "");
-    box.innerHTML = html + (qr ? `<div class="qrs">${qr}</div>` : "");
-  }
-  $("menuPreview").addEventListener("click", (e) => { const b = e.target.closest("[data-pv]"); if (b) { H.pv = b.dataset.pv; renderPreview(); } });
-  ["rfMsg", "rfLink", "rfFollow"].forEach((id) => $(id).addEventListener("input", renderPreview));
+  $("poolAdd").onclick = async () => {
+    const t = $("poolNew").value.trim(); if (!t) return;
+    const pool = [...(H.settings.public_pool || [])]; if (pool.includes(t)) return toast("已經有這句了");
+    pool.push(t);
+    if (await saveSettings({ public_pool: pool }, "已新增")) { $("poolNew").value = ""; renderPool(); }
+  };
+  $("poolNew").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("poolAdd").click(); } });
 
-  // 紀錄
-  const LOG_FILTERS = [["need", "要妳處理"], ["done", "已自動回覆"], ["all", "全部"]];
-  const ACTION_TXT = { keyword: "關鍵字", gate_ok: "已確認追蹤・送出內容", gate_wait: "請對方追蹤", flow: "按鈕選單", ai: "AI 回答", skip: "略過" };
+  // ---------- 紀錄、需要妳回 ----------
+  const LOG_FILTERS = [["all", "全部"], ["done", "已送出"], ["click", "按了按鈕"], ["problem", "失敗／略過"]];
+  const ACTION_TXT = { greet: "送出招呼＋按鈕", sent: "送出內容", click: "按了按鈕・送出內容", thanks: "回謝謝", ai: "AI 回答", skip: "略過",
+    keyword: "關鍵字", gate_ok: "送出內容", gate_wait: "請對方追蹤", flow: "按鈕選單" };
+  const KIND_TXT = { comment: "留言", message: "私訊", story: "限動回覆" };
   const STATUS_TXT = { done: ["p-ready", "已回覆"], skipped: ["p-wait", "略過"], needs_human: ["p-open", "要妳處理"], error: ["p-part", "出錯"] };
+  const isNeed = (l) => (l.status === "needs_human" || l.status === "error") && !l.handled;
   async function loadLogs() {
-    const { data, error } = await sb.from("reply_log").select("*").order("created_at", { ascending: false }).limit(100);
+    const { data, error } = await sb.from("reply_log").select("*").order("created_at", { ascending: false }).limit(200);
     if (error) return;
     H.logs = data; renderLogs();
   }
-  function renderLogs() {
-    const need = H.logs.filter((l) => (l.status === "needs_human" || l.status === "error") && !l.handled).length;
-    [$("needBadge"), $("replyBadge")].forEach((b) => { b.hidden = !need; b.textContent = need; });
-    $("logFilters").innerHTML = LOG_FILTERS.map(([k, l]) => `<button class="chipbtn" type="button" data-lf="${k}" aria-pressed="${H.logFilter === k}">${l}</button>`).join("");
-    const list = H.logs.filter((l) => H.logFilter === "all" || (H.logFilter === "need" ? (l.status === "needs_human" || l.status === "error") && !l.handled : l.status === "done"));
-    if (!list.length) { $("logList").innerHTML = `<p class="hint">${H.logFilter === "need" ? "目前沒有需要妳處理的留言 🎉" : "還沒有紀錄。"}</p>`; return; }
-    $("logList").innerHTML = list.map((l) => {
-      const [pc, pt] = STATUS_TXT[l.status] || ["p-wait", l.status];
-      return `<div class="lrow ${esc(l.status)}">
-        <div class="lh"><span class="pill ${pc}">${pt}</span><b>${l.platform === "ig" ? "IG" : "FB"}${l.kind === "message" ? " 私訊" : " 留言"}</b><span>${esc(l.user_name || "")}</span><span>${GB.tw(l.created_at).slice(5, 16)}</span>${l.action ? `<span>${ACTION_TXT[l.action] || esc(l.action)}</span>` : ""}
-          ${(l.status === "needs_human" || l.status === "error") && !l.handled ? `<button class="btn small" type="button" data-done="${l.id}" style="margin-left:auto">已處理</button>` : ""}</div>
-        ${l.text ? `<div class="lt">「${esc(l.text)}」</div>` : ""}
-        ${l.reply ? `<div class="lr">${esc(l.reply)}</div>` : ""}
-        ${l.error ? `<div class="hint" style="margin:4px 0 0;color:var(--ship-ink)">${esc(l.error)}</div>` : ""}
-      </div>`;
-    }).join("");
+  function logRow(l, withDone) {
+    const [pc, pt] = STATUS_TXT[l.status] || ["p-wait", l.status];
+    const rule = l.rule_id && H.rules.find((r) => r.id === l.rule_id);
+    return `<div class="lrow ${esc(l.status)}">
+      <div class="lh"><span class="pill ${pc}">${pt}</span><b>${l.platform === "ig" ? "IG" : "FB"} ${KIND_TXT[l.kind] || ""}</b><span>${esc(l.user_name || "")}</span><span>${GB.tw(l.created_at).slice(5, 16)}</span>${l.action ? `<span>${ACTION_TXT[l.action] || esc(l.action)}</span>` : ""}${rule ? `<span>⚡ ${esc(rule.name || rule.keywords.join("、"))}</span>` : ""}
+        ${withDone && isNeed(l) ? `<button class="btn small" type="button" data-done="${l.id}" style="margin-left:auto">已處理</button>` : ""}</div>
+      ${l.text ? `<div class="lt">「${esc(l.text)}」</div>` : ""}
+      ${l.reply ? `<div class="lr">${esc(l.reply)}</div>` : ""}
+      ${l.error ? `<div class="hint" style="margin:4px 0 0;color:var(--ship-ink)">${esc(l.error)}</div>` : ""}
+    </div>`;
   }
+  function renderLogs() {
+    const need = H.logs.filter(isNeed);
+    [$("needBadge"), $("replyBadge")].forEach((b) => { b.hidden = !need.length; b.textContent = need.length; });
+    $("needList").innerHTML = need.length ? need.map((l) => logRow(l, true)).join("") : `<p class="hint">目前沒有需要妳處理的留言 🎉</p>`;
+    $("logFilters").innerHTML = LOG_FILTERS.map(([k, l]) => `<button class="chipbtn" type="button" data-lf="${k}" aria-pressed="${H.logFilter === k}">${l}</button>`).join("");
+    const f = H.logFilter;
+    const list = H.logs.filter((l) => f === "all" || (f === "done" ? l.status === "done" : f === "click" ? l.action === "click" : l.status !== "done"));
+    $("logList").innerHTML = list.length ? list.map((l) => logRow(l, true)).join("") : `<p class="hint">還沒有紀錄。</p>`;
+  }
+  if (H.logFilter === "need") H.logFilter = "all";
   $("logFilters").onclick = (e) => { const b = e.target.closest("[data-lf]"); if (b) { H.logFilter = b.dataset.lf; renderLogs(); } };
-  $("logList").onclick = async (e) => {
+  const markDone = async (e) => {
     const b = e.target.closest("[data-done]"); if (!b) return;
     const { error } = await sb.from("reply_log").update({ handled: true }).eq("id", +b.dataset.done);
     if (error) return toast(errMsg(error));
     H.logs.find((l) => l.id === +b.dataset.done).handled = true; renderLogs();
+  };
+  $("needList").onclick = markDone; $("logList").onclick = markDone;
+
+  // ---------- 設定 ----------
+  function renderSettings() {
+    const s = H.settings; if (!s) return;
+    $("sDmReady").checked = !!s.dm_ready; $("sTyping").checked = s.typing !== false; $("sDelay").value = s.delay_sec ?? 1.3;
+    $("sThanks").checked = s.thanks_enabled !== false; $("sThanksTxt").value = (s.thanks_replies || []).join("\n");
+    $("sGreet").value = s.default_greeting || ""; $("sInviteIg").value = s.invite_ig || ""; $("sInviteFb").value = s.invite_fb || "";
+    $("sAi").checked = !!s.ai_enabled; $("sStyle").value = s.ai_style || "";
+    $("sSince").value = toLocal(s.active_since);
+    $("whUrl").textContent = FN + "meta-webhook"; $("whToken").textContent = s.verify_token;
+  }
+  $("sDmReady").onchange = (e) => {
+    if (e.target.checked && !confirm("確定 Meta 已經核准私訊權限了嗎？\n打開後，「先按按鈕再給」的規則會先送招呼＋按鈕；如果其實還沒核准，客人按了按鈕會沒反應。")) { e.target.checked = false; return; }
+    saveSettings({ dm_ready: e.target.checked }, e.target.checked ? "已打開：按鈕、限動、私訊規則開始運作" : "已關閉：先按按鈕的規則改成直接給");
+  };
+  $("sTyping").onchange = (e) => saveSettings({ typing: e.target.checked }, "已儲存");
+  $("sThanks").onchange = (e) => saveSettings({ thanks_enabled: e.target.checked }, "已儲存");
+  $("sAi").onchange = (e) => saveSettings({ ai_enabled: e.target.checked }, "已儲存");
+  $("sSince").onchange = (e) => { const v = e.target.value; saveSettings({ active_since: fromLocal(v) }, v ? "已儲存：這個時間之前的貼文不自動回覆" : "已儲存：所有貼文都會自動回覆"); };
+  $("rs-settings").onsubmit = (e) => {
+    e.preventDefault();
+    const delay = Math.min(5, Math.max(0, Number($("sDelay").value) || 0));
+    saveSettings({ delay_sec: delay, thanks_replies: lines($("sThanksTxt").value), default_greeting: $("sGreet").value.trim(),
+      invite_ig: $("sInviteIg").value.trim(), invite_fb: $("sInviteFb").value.trim(), ai_style: $("sStyle").value.trim() }, "設定已儲存");
   };
 
   // ========== 連接 Meta：到 Facebook 授權「好事丞雙自動回覆」App，伺服器換成粉絲頁長期權杖 ==========
@@ -367,7 +578,7 @@
     for (let i = 0; i < 40 && !S.role; i++) await new Promise((r) => setTimeout(r, 250));
     if (S.role !== "admin") return;
     if (metaResult) {
-      showTab("reply");
+      showTab("reply"); setSub("settings");
       toast(metaResult === "ok" ? "已連接粉絲頁與 IG 🎉" : "連接失敗：" + metaResult);
     } else loadLogs();
   })();

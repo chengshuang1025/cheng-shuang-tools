@@ -1,12 +1,19 @@
-// meta-webhook：接收 IG／FB 粉絲頁的留言與私訊通知，自動回覆
-// 流程：
-//   留言含關鍵字 → 公開回一句「已私訊妳囉」→ 私訊對方
-//     要先追蹤：私訊附「我追蹤好了，領取」按鈕 → 對方按下後，IG 查是否真的有追蹤，有才送連結；FB 無法查，按了就送
-//     不用追蹤：私訊直接送連結
-//     有「私訊按鈕選單」：私訊帶按鈕，按了送對應內容；每個按鈕可各自設定「要追蹤才給」
-//   沒有關鍵字 → 交給 Gemini 判斷是不是團購問題，資料裡有答案就私訊回答，沒有就留給團主處理
+// meta-webhook：接收 IG／FB 粉絲頁的留言、限動回覆、私訊，自動回覆
+// 規則分三種來源：貼文留言（comment）／限動回覆（story，只有 IG）／私訊（dm）
+//   可以鎖定某一篇貼文或某一則限動；關鍵字可設「同音錯字也算」或「不用關鍵字，有留言就回」
+// 回覆方式：
+//   貼文留言 → 先在留言底下公開回一句（從勾選的句子隨機挑）→ 再私訊
+//   私訊「第一則就給連結」：直接送內容＋連結按鈕＋邀請追蹤的一句
+//   私訊「先按按鈕再給」：先送招呼語＋按鈕（例如『我想更了解這產品！』『我想索取連結』），
+//     客人按了才送內容＋連結按鈕＋邀請追蹤的一句
+//   ※ Meta 還沒核准私訊權限前，一般人按按鈕、回限動、傳私訊都不會送到這裡，
+//      所以後台「Meta 私訊權限已核准」沒打開時，「先按按鈕再給」會自動改成第一則就給
+//   沒有符合的規則、但像在發問的留言 → 交給 Gemini 回答團購問題，答不出來留給團主
+//   客人在自動回覆後 30 分鐘內說謝謝 → 隨機回一句（同一個人一天一次）
+// 後台挑貼文用：GET ?hub.mode=media&hub.verify_token=… 回傳最近的 IG 貼文、限動、FB 貼文
 // 需要的 Secrets：META_APP_SECRET、GEMINI_API_KEY（GEMINI_MODEL、GRAPH_VERSION 可不設）
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { pinyin } from "npm:pinyin-pro@3";
 
 const GV = Deno.env.get("GRAPH_VERSION") ?? "v23.0";
 const G = `https://graph.facebook.com/${GV}`;
@@ -17,14 +24,14 @@ const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
 
 type Ctx = { settings: any; conn: any; rules: any[] };
 type Platform = "ig" | "fb";
-
-// 要不要「先確認追蹤才給連結」：Meta 核准 instagram_manage_messages／pages_messaging 進階權限後，
-// 在 Secrets 加 VERIFY_FOLLOW=1 就會改回按鈕＋確認追蹤的流程
-const VERIFY_FOLLOW = Deno.env.get("VERIFY_FOLLOW") === "1";
+type Source = "comment" | "story" | "dm";
 
 // ---------- 小工具 ----------
 const norm = (s: string) => String(s || "").toLowerCase().replace(/\s+/g, "");
 const todayTW = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const py = (s: string) => " " + pinyin(String(s || ""), { toneType: "none", type: "array", nonZh: "consecutive" }).join(" ").toLowerCase().replace(/\s+/g, " ").trim() + " ";
 
 async function verifySignature(raw: string, header: string | null) {
   if (!APP_SECRET) return true; // 還沒設定密鑰時先不檢查（測試用）
@@ -51,61 +58,71 @@ async function graphGet(path: string, params: Record<string, string>, token: str
   return j;
 }
 
+// ---------- 送出 ----------
 // 公開回覆在留言底下
 async function publicReply(p: Platform, commentId: string, text: string, ctx: Ctx) {
   if (!text) return;
   if (p === "ig") await graphPost(`${commentId}/replies`, { message: text }, ctx.conn.page_token);
   else await graphPost(`${commentId}/comments`, { message: text }, ctx.conn.page_token);
 }
-// 私訊：recipient 可以是 {comment_id}（從留言私訊，只能一次）或 {id}（對方已經傳過訊息）
-type Btn = { title: string; payload: string };
-async function sendDM(recipient: Record<string, string>, text: string, ctx: Ctx, buttons?: Btn | Btn[]) {
-  const list = !buttons ? [] : Array.isArray(buttons) ? buttons.slice(0, 13) : [buttons];
-  const message: Record<string, unknown> = { text: String(text || "").slice(0, 1000) };
-  if (list.length) message.quick_replies = list.map((b) => ({ content_type: "text", title: b.title.slice(0, 20), payload: b.payload }));
+type Btn = { type: "url"; title: string; url: string } | { type: "postback"; title: string; payload: string };
+// recipient：{comment_id}（從留言私訊，只能送一則）或 {id}（對方傳過訊息、按過按鈕）
+async function send(recipient: Record<string, string>, text: string, ctx: Ctx, buttons: Btn[] = []) {
+  const page = ctx.conn.page_id, token = ctx.conn.page_token;
+  const extra = recipient.id ? { messaging_type: "RESPONSE" } : {};
+  if (recipient.id && ctx.settings.typing) {
+    // 先顯示「輸入中…」，停一下再送，比較像真人
+    try { await graphPost(`${page}/messages`, { recipient, sender_action: "typing_on" }, token); } catch (_) { /* 有些情況不支援，略過 */ }
+    await sleep(Math.min(5, Math.max(0, Number(ctx.settings.delay_sec) || 0)) * 1000);
+  }
+  const body = String(text || "").trim() || "👇";
+  const btns = buttons.slice(0, 3);
+  if (btns.length && body.length <= 640) {
+    try {
+      await graphPost(`${page}/messages`, {
+        recipient, ...extra,
+        message: { attachment: { type: "template", payload: { template_type: "button", text: body,
+          buttons: btns.map((b) => b.type === "url" ? { type: "web_url", url: b.url, title: b.title.slice(0, 20) } : { type: "postback", title: b.title.slice(0, 20), payload: b.payload }) } } },
+      }, token);
+      return;
+    } catch (_) { /* 卡片送不出去：改成純文字（按鈕改用快速回覆、連結直接寫在文字裡）*/ }
+  }
+  const urls = btns.filter((b) => b.type === "url") as { title: string; url: string }[];
+  const posts = btns.filter((b) => b.type === "postback") as { title: string; payload: string }[];
+  const plain = [body, ...urls.map((b) => `${b.title}：${b.url}`)].join("\n\n").slice(0, 1000);
+  const message: Record<string, unknown> = { text: posts.length ? `${plain}\n\n（按鈕不見的話，直接回覆「${posts[0].title}」也可以 😊）`.slice(0, 1000) : plain };
+  if (posts.length) message.quick_replies = posts.map((b) => ({ content_type: "text", title: b.title.slice(0, 20), payload: b.payload }));
   try {
-    await graphPost(`${ctx.conn.page_id}/messages`, { recipient, message, ...(recipient.id ? { messaging_type: "RESPONSE" } : {}) }, ctx.conn.page_token);
+    await graphPost(`${page}/messages`, { recipient, ...extra, message }, token);
   } catch (e) {
-    if (!list.length) throw e;
-    // 有些情況不能帶按鈕：改成請對方打字回覆
-    const tip = list.length === 1 && list[0].payload.startsWith("GATE:")
-      ? "（按鈕不見的話，直接回覆我「好了」也可以領取 🎁）"
-      : `（按鈕不見的話，直接回覆按鈕上的字就可以：${list.map((b) => "「" + b.title + "」").join("、")}）`;
-    await graphPost(`${ctx.conn.page_id}/messages`, { recipient, message: { text: `${text}\n\n${tip}` } }, ctx.conn.page_token);
+    if (!posts.length) throw e;
+    await graphPost(`${page}/messages`, { recipient, ...extra, message: { text: message.text } }, token);
   }
 }
 
-// ---------- 私訊按鈕選單 ----------
-type Node = { id: string; title: string; text?: string; link?: string; follow?: boolean; children?: Node[] };
-const HOME = "🏠 回主選單";
-function findNode(nodes: Node[] = [], id: string): Node | null {
-  for (const n of nodes) {
-    if (n.id === id) return n;
-    const hit = findNode(n.children, id);
-    if (hit) return hit;
+// 規則的內容：文字＋邀請追蹤的一句＋連結按鈕
+const linkButtons = (rule: any): Btn[] =>
+  (Array.isArray(rule.link_buttons) ? rule.link_buttons : []).filter((b: any) => b?.url).slice(0, 3)
+    .map((b: any) => ({ type: "url", title: b.title || "🔗 點我打開", url: b.url }));
+const contentText = (rule: any, p: Platform, ctx: Ctx) =>
+  [rule.message, rule.link, rule.follow_invite ? (p === "ig" ? ctx.settings.invite_ig : ctx.settings.invite_fb) : ""].filter(Boolean).join("\n\n");
+const useButton = (rule: any, ctx: Ctx) => rule.mode === "button" && !!ctx.settings.dm_ready;
+const greetText = (rule: any, ctx: Ctx) => rule.greeting || ctx.settings.default_greeting || "嗨嗨～謝謝妳 🥰 按下面的按鈕，我馬上傳給妳 👇";
+const clickButton = (rule: any): Btn => ({ type: "postback", title: rule.button_label || "我想更了解這產品！", payload: `CLICK:${rule.id}` });
+
+// 觸發後的私訊：先按按鈕再給 → 招呼語＋按鈕；第一則就給 → 內容＋連結按鈕
+async function deliver(recipient: Record<string, string>, rule: any, p: Platform, ctx: Ctx) {
+  if (useButton(rule, ctx)) {
+    const t = greetText(rule, ctx);
+    await send(recipient, t, ctx, [clickButton(rule)]);
+    return { action: "greet", reply: `${t}\n［按鈕］${rule.button_label}` };
   }
-  return null;
-}
-const hasMenu = (rule: any) => Array.isArray(rule?.menu) && rule.menu.length > 0;
-const anyFollow = (nodes: Node[] = []): boolean => nodes.some((n) => n.follow || anyFollow(n.children));
-// 某一層要顯示的按鈕：有下一層就列下一層；最後一層就給「回主選單」
-function menuButtons(rule: any, nodes: Node[] | undefined, atRoot: boolean): Btn[] {
-  const list = (nodes || []).filter((n) => n.title).map((n) => ({ title: n.title, payload: `FLOW:${rule.id}:${n.id}` }));
-  if (list.length) return list;
-  return atRoot ? [] : [{ title: HOME, payload: `FLOW:${rule.id}:root` }];
-}
-const nodeMessage = (n: Node) => [n.text, n.link].filter(Boolean).join("\n\n") || n.title;
-const startMessage = (rule: any) => linkMessage(rule) || "請選擇妳想要的 👇";
-// Meta 還沒核准讀取一般人私訊前，按鈕按了也收不到 → 一次把選單內容全部列出來
-function flatMenu(nodes: Node[] = [], depth = 0): string {
-  return nodes.filter((n) => n.title).map((n) => {
-    const head = depth ? `▸ ${n.title}` : `👉 ${n.title}`;
-    const body = [n.text, n.link].filter(Boolean).join("\n");
-    const sub = flatMenu(n.children, depth + 1);
-    return [head, body, sub].filter(Boolean).join("\n");
-  }).join("\n\n");
+  const t = contentText(rule, p, ctx);
+  await send(recipient, t, ctx, linkButtons(rule));
+  return { action: "sent", reply: t };
 }
 
+// ---------- 紀錄 ----------
 // 先寫一筆紀錄佔位，重複的通知就不會回兩次
 async function claim(row: Record<string, unknown>) {
   const { data, error } = await db.from("reply_log").insert({ ...row, status: "skipped" }).select("id").single();
@@ -113,10 +130,38 @@ async function claim(row: Record<string, unknown>) {
   return data.id as number;
 }
 const finish = (id: number, patch: Record<string, unknown>) => db.from("reply_log").update(patch).eq("id", id);
+// 同一個人在這條規則已經收過了嗎？（測試用的規則可以重複）
+async function alreadyGot(rule: any, userId: string) {
+  if (rule.allow_repeat || !userId) return false;
+  const { data } = await db.from("reply_log").select("id").eq("rule_id", rule.id).eq("user_id", userId)
+    .in("action", ["greet", "sent"]).eq("status", "done").limit(1);
+  return !!data?.length;
+}
 
-function matchRule(p: Platform, text: string, ctx: Ctx, oldPost = false) {
+// ---------- 找規則 ----------
+function keywordHit(rule: any, text: string) {
+  if (rule.any_text) return true;
+  const kws: string[] = (rule.keywords || []).filter(Boolean);
+  if (!kws.length) return false;
   const t = norm(text);
-  return ctx.rules.find((r) => r.active && (!oldPost || r.all_posts) && r.platforms.includes(p) && r.keywords.some((k: string) => k && t.includes(norm(k))));
+  if (kws.some((k) => t.includes(norm(k)))) return true;
+  if (!rule.fuzzy) return false;
+  const tp = py(text);
+  return kws.some((k) => { const kp = py(k); return kp.trim().length >= 2 && tp.includes(kp); });
+}
+function inTime(rule: any) {
+  const now = Date.now();
+  if (rule.starts_at && Date.parse(rule.starts_at) > now) return false;
+  if (rule.ends_at && Date.parse(rule.ends_at) < now) return false;
+  return true;
+}
+// 鎖定某一篇的規則優先；有關鍵字的優先於「有留言就回」
+function findRule(src: Source, p: Platform, text: string, postId: string | undefined, ctx: Ctx, oldPost = false) {
+  const ok = ctx.rules.filter((r) =>
+    r.active && !r.archived && (r.source || "comment") === src && (r.platforms || []).includes(p) && inTime(r) &&
+    (r.post_id ? r.post_id === postId : (!oldPost || r.all_posts)) && keywordHit(r, text));
+  const score = (r: any) => (r.post_id ? 2 : 0) + (r.any_text ? 0 : 1);
+  return ok.sort((a, b) => score(b) - score(a))[0];
 }
 
 // 這則留言所在的貼文，是不是在「開始自動回覆」之前發的？舊貼文交給 FB／IG 內建的自動回覆
@@ -138,10 +183,7 @@ async function isOldPost(p: Platform, postId: string | undefined, ctx: Ctx) {
 // 看起來像在問問題（問號、疑問詞、或提到團購相關字）
 const looksLikeQuestion = (t: string) =>
   /[?？]|嗎|呢|什麼|甚麼|何時|幾號|幾點|多少|怎麼|如何|哪裡|哪邊|可以.{0,6}(買|訂|寄|用)|連結|開團|收團|價格|價錢|運費|免運|出貨|團購|還有|截止/.test(String(t || ""));
-// 私訊內容像是在說「我追蹤好了／按讚了，要領取」
-const looksLikeClaim = (t: string) => /好了|好囉|好喔|領取|追蹤|按讚|已讚|ok|OK|完成|\+1|要/.test(String(t || ""));
-const linkMessage = (rule: any) => [rule.message, rule.link].filter(Boolean).join("\n\n");
-const trustAsk = (p: Platform) => p === "ig" ? "喜歡的話記得追蹤 @cheng.shuang1025 喔 🥰 之後還有更多好玩的學習單！" : "喜歡的話記得幫好事丞雙的粉絲頁按個讚喔 🥰 之後還有更多好玩的學習單！";
+const looksLikeThanks = (t: string) => /謝謝|感謝|謝啦|謝囉|3q|thx|thank|🙏/i.test(String(t || ""));
 
 // ---------- Gemini：判斷團購問題並回答 ----------
 async function askGemini(text: string, ctx: Ctx) {
@@ -177,46 +219,34 @@ ${info || "（目前沒有團購資料）"}
   return JSON.parse(out) as { intent: string; can_answer: boolean; answer: string };
 }
 
-// ---------- 留言 ----------
+// ---------- 貼文留言 ----------
 async function onComment(p: Platform, c: { id: string; userId: string; userName: string; text: string; postId?: string }, ctx: Ctx) {
   if (!c.text) return;
   const logId = await claim({ platform: p, kind: "comment", event_id: `${p}:c:${c.id}`, post_id: c.postId, user_id: c.userId, user_name: c.userName, text: c.text });
   if (!logId) return;
   try {
     const oldPost = await isOldPost(p, c.postId, ctx);
-    const rule = matchRule(p, c.text, ctx, oldPost);
+    const rule = findRule("comment", p, c.text, c.postId, ctx, oldPost);
     if (rule) {
-      let dm: string, buttons: Btn[] | undefined, action: string;
-      const menu = hasMenu(rule);
-      if (!VERIFY_FOLLOW) {
-        // 信任制：直接給連結（有按鈕選單的話一次全部列出來），要追蹤的附一句請對方追蹤／按讚
-        // （Meta 還沒核准進階權限前，一般人的私訊回覆收不到，按鈕流程會卡住）
-        const needAsk = rule.require_follow || (menu && anyFollow(rule.menu));
-        dm = [linkMessage(rule), menu ? flatMenu(rule.menu) : "", needAsk ? trustAsk(p) : ""].filter(Boolean).join("\n\n");
-        action = "keyword";
-      } else if (rule.require_follow) {
-        dm = p === "ig" ? ctx.settings.follow_prompt : ctx.settings.fb_like_prompt;
-        buttons = [{ title: ctx.settings.follow_button, payload: `GATE:${rule.id}` }];
-        action = "gate_wait";
-      } else if (menu) {
-        dm = startMessage(rule); buttons = menuButtons(rule, rule.menu, true); action = "flow";
-      } else { dm = linkMessage(rule); action = "keyword"; }
-      await publicReply(p, c.id, ctx.settings.public_reply, ctx);
-      await sendDM({ comment_id: c.id }, dm, ctx, buttons);
-      await finish(logId, { rule_id: rule.id, action, reply: dm, status: "done", step: action === "flow" ? "root" : null });
+      if (await alreadyGot(rule, c.userId)) { await finish(logId, { rule_id: rule.id, action: "skip", status: "skipped", error: "這個人已經收過這條規則的私訊" }); return; }
+      const pub = (rule.public_replies || []).filter(Boolean);
+      if (pub.length) await publicReply(p, c.id, pick(pub), ctx);
+      const r = await deliver({ comment_id: c.id }, rule, p, ctx);
+      await finish(logId, { rule_id: rule.id, ...r, status: "done" });
       return;
     }
     if (oldPost) { await finish(logId, { action: "skip", status: "skipped", error: "舊貼文，交給 FB／IG 內建的自動回覆" }); return; }
     if (!ctx.settings.ai_enabled) return;
-    // 只有「看起來在發問」的留言才問 AI（免費額度一天只有少量次數，像「吹風機」「謝謝分享」這類留言直接略過）
+    // 只有「看起來在發問」的留言才問 AI（免費額度一天只有少量次數）
     if (!looksLikeQuestion(c.text)) { await finish(logId, { action: "skip", status: "skipped" }); return; }
     let ai;
     try { ai = await askGemini(c.text, ctx); }
     catch (e) { await finish(logId, { action: "ai", status: "needs_human", error: "AI 暫時無法回答（" + String((e as Error).message).slice(0, 80) + "），請團主回覆" }); return; }
     if (!ai) return;
     if (ai.intent === "groupbuy" && ai.can_answer && ai.answer) {
-      await publicReply(p, c.id, ctx.settings.public_reply, ctx);
-      await sendDM({ comment_id: c.id }, ai.answer, ctx);
+      const pool = (ctx.settings.public_pool || []).filter(Boolean);
+      await publicReply(p, c.id, pool.length ? pick(pool) : ctx.settings.public_reply, ctx);
+      await send({ comment_id: c.id }, ai.answer, ctx);
       await finish(logId, { action: "ai", reply: ai.answer, status: "done" });
     } else if (ai.intent === "groupbuy" || ai.intent === "question") {
       await finish(logId, { action: "ai", status: "needs_human", error: "資料裡沒有答案，請團主回覆" });
@@ -228,149 +258,72 @@ async function onComment(p: Platform, c: { id: string; userId: string; userName:
   }
 }
 
-// ---------- 私訊按鈕選單：按下某個按鈕 ----------
-// payload：FLOW:<規則>:<按鈕>（root＝主選單）；:chk＝IG 按「我追蹤好了」再查一次；:ok＝FB 按了「按讚好了」
-function parseFlow(s: string) {
-  const [, r, n, mode] = s.split(":");
-  return { ruleId: +r, step: n || "root", mode: mode || "" };
-}
-async function runFlow(p: Platform, sender: string, f: { ruleId: number; step: string; mode: string }, text: string, eventId: string, ctx: Ctx) {
-  const rule = ctx.rules.find((r) => r.id === f.ruleId && r.active);
-  if (!rule) return;
-  const logId = await claim({ platform: p, kind: "message", event_id: eventId, user_id: sender, text, rule_id: rule.id, step: f.step });
-  if (!logId) return;
-  try {
-    const node = f.step === "root" ? null : findNode(rule.menu, f.step);
-    if (!node) {
-      const dm = f.step === "root" ? startMessage(rule) : "這個選項已經更新囉，請重新選一次 👇";
-      await sendDM({ id: sender }, dm, ctx, menuButtons(rule, rule.menu, true));
-      await finish(logId, { action: "flow", step: "root", reply: dm, status: "done" });
-      return;
-    }
-    let name = "";
-    if (node.follow && VERIFY_FOLLOW) {
-      if (p === "ig") {
-        const prof = await graphGet(sender, { fields: "username,is_user_follow_business" }, ctx.conn.page_token);
-        name = prof.username || "";
-        if (!prof.is_user_follow_business) {
-          const dm = f.mode === "chk" ? ctx.settings.not_following : ctx.settings.follow_prompt;
-          await sendDM({ id: sender }, dm, ctx, { title: ctx.settings.follow_button, payload: `FLOW:${rule.id}:${node.id}:chk` });
-          await finish(logId, { action: "gate_wait", reply: dm, status: "done", user_name: name || null });
-          return;
-        }
-      } else if (f.mode !== "ok") {
-        // FB 查不到有沒有按讚：請對方按讚，按了「好了」就給
-        const dm = ctx.settings.fb_like_prompt;
-        await sendDM({ id: sender }, dm, ctx, { title: ctx.settings.follow_button, payload: `FLOW:${rule.id}:${node.id}:ok` });
-        await finish(logId, { action: "gate_wait", reply: dm, status: "done" });
-        return;
-      }
-    }
-    const dm = [nodeMessage(node), node.follow && !VERIFY_FOLLOW ? trustAsk(p) : ""].filter(Boolean).join("\n\n");
-    await sendDM({ id: sender }, dm, ctx, menuButtons(rule, node.children, false));
-    await finish(logId, { action: node.follow ? "gate_ok" : "flow", reply: dm, status: "done", user_name: name || null });
-  } catch (e) {
-    await finish(logId, { status: "error", error: (e as Error).message });
-  }
-}
-
-// 按鈕不見了、改打字：看這個人最近停在選單的哪一層，比對按鈕上的字
-async function guessFlow(p: Platform, sender: string, text: string, ctx: Ctx) {
-  const { data } = await db.from("reply_log").select("rule_id,step,action").eq("platform", p).eq("user_id", sender)
-    .not("rule_id", "is", null).not("step", "is", null).in("action", ["flow", "gate_wait", "gate_ok"])
-    .gte("created_at", new Date(Date.now() - 7 * 864e5).toISOString()).order("created_at", { ascending: false }).limit(1);
-  const last = data?.[0];
-  const rule = last && ctx.rules.find((r) => r.id === last.rule_id && r.active);
-  if (!rule || !hasMenu(rule)) return null;
-  if (last.action === "gate_wait" && last.step !== "root") {
-    return looksLikeClaim(text) ? { ruleId: rule.id, step: last.step, mode: p === "fb" ? "ok" : "chk" } : null;
-  }
-  const atRoot = last.step === "root";
-  const shown = menuButtons(rule, atRoot ? rule.menu : findNode(rule.menu, last.step)?.children, atRoot);
-  const t = norm(text);
-  if (!t) return null;
-  const hit = shown.find((b) => norm(b.title) === t)
-    || (t.length >= 2 ? shown.find((b) => norm(b.title).includes(t) || t.includes(norm(b.title).replace(/[^\p{L}\p{N}]/gu, ""))) : undefined);
-  return hit ? parseFlow(hit.payload) : null;
-}
-
-// ---------- 私訊（按按鈕、或打字回覆）----------
+// ---------- 私訊（按按鈕、回限動、傳私訊、說謝謝）----------
 async function onMessage(p: Platform, m: any, ctx: Ctx) {
   const sender = m.sender?.id;
   if (!sender || m.message?.is_echo || sender === ctx.conn.page_id || sender === ctx.conn.ig_user_id) return;
-  const payload: string = m.message?.quick_reply?.payload || m.postback?.payload || "";
+  if (m.read || m.delivery || m.reaction) return;
+  const payload: string = m.postback?.payload || m.message?.quick_reply?.payload || "";
   const text: string = m.message?.text || m.postback?.title || "";
   const eventId = `${p}:m:${m.message?.mid || m.postback?.mid || crypto.randomUUID()}`;
+  const storyId: string | undefined = m.message?.reply_to?.story?.id;
+  const me = { id: sender };
 
-  // 私訊按鈕選單
-  let flow = payload.startsWith("FLOW:") ? parseFlow(payload) : null;
-  if (!flow && !payload && text) flow = await guessFlow(p, sender, text, ctx);
-  if (flow) { await runFlow(p, sender, flow, text, eventId, ctx); return; }
-
-  let ruleId = payload.startsWith("GATE:") ? +payload.slice(5) : 0;
-  if (!ruleId && looksLikeClaim(text) && !matchRule(p, text, ctx)) {
-    // 按鈕不見了、改打字「好了」：先找這個人最近在等領取的規則
-    const since = new Date(Date.now() - 7 * 864e5).toISOString();
-    const { data } = await db.from("reply_log").select("rule_id").eq("platform", p).eq("user_id", sender).eq("action", "gate_wait")
-      .is("step", null).not("rule_id", "is", null).gte("created_at", since).order("created_at", { ascending: false }).limit(1);
-    ruleId = data?.[0]?.rule_id || 0;
-    if (!ruleId) {
-      // 留言和私訊的帳號編號有時對不上：改用這個平台最近 2 小時內有人在等的規則
-      const { data: d2 } = await db.from("reply_log").select("rule_id").eq("platform", p).eq("action", "gate_wait")
-        .is("step", null).not("rule_id", "is", null).gte("created_at", new Date(Date.now() - 2 * 3600e3).toISOString()).order("created_at", { ascending: false }).limit(1);
-      ruleId = d2?.[0]?.rule_id || 0;
-    }
+  // 1. 按了『我想更了解這產品！』之類的按鈕（或按鈕不見、直接打按鈕上的字）
+  let ruleId = payload.startsWith("CLICK:") ? +payload.slice(6) : 0;
+  if (!ruleId && !payload && text && !storyId) {
+    const { data } = await db.from("reply_log").select("rule_id").eq("platform", p).eq("user_id", sender).eq("action", "greet")
+      .not("rule_id", "is", null).gte("created_at", new Date(Date.now() - 7 * 864e5).toISOString()).order("created_at", { ascending: false }).limit(1);
+    const r = data?.[0] && ctx.rules.find((x) => x.id === data[0].rule_id);
+    const t = norm(text), lab = norm(r?.button_label || "");
+    if (r && t.length >= 2 && !looksLikeThanks(text) && (lab.includes(t) || t.includes(lab) || /了解|瞭解|索取|連結|想要|\+1/.test(text))) ruleId = r.id;
   }
-  if (!ruleId) {
-    // 直接私訊關鍵字：跟留言一樣
-    const r = matchRule(p, text, ctx);
-    if (!r) return; // 一般私訊交給團主自己看
-    const id0 = await claim({ platform: p, kind: "message", event_id: eventId, user_id: sender, text, rule_id: r.id });
-    if (!id0) return;
+  if (ruleId) {
+    const rule = ctx.rules.find((r) => r.id === ruleId);
+    if (!rule) return;
+    const logId = await claim({ platform: p, kind: "message", event_id: eventId, user_id: sender, text, rule_id: rule.id });
+    if (!logId) return;
     try {
-      const menu = hasMenu(r);
-      if (r.require_follow && VERIFY_FOLLOW) {
-        const dm = p === "ig" ? ctx.settings.follow_prompt : ctx.settings.fb_like_prompt;
-        await sendDM({ id: sender }, dm, ctx, { title: ctx.settings.follow_button, payload: `GATE:${r.id}` });
-        await finish(id0, { action: "gate_wait", reply: dm, status: "done" });
-      } else if (menu && VERIFY_FOLLOW) {
-        const dm = startMessage(r);
-        await sendDM({ id: sender }, dm, ctx, menuButtons(r, r.menu, true));
-        await finish(id0, { action: "flow", step: "root", reply: dm, status: "done" });
-      } else {
-        const needAsk = r.require_follow || (menu && anyFollow(r.menu));
-        const dm = [linkMessage(r), menu ? flatMenu(r.menu) : "", needAsk ? trustAsk(p) : ""].filter(Boolean).join("\n\n");
-        await sendDM({ id: sender }, dm, ctx);
-        await finish(id0, { action: "keyword", reply: dm, status: "done" });
-      }
-    } catch (e) {
-      await finish(id0, { status: "error", error: (e as Error).message });
-    }
+      const t = contentText(rule, p, ctx);
+      await send(me, t, ctx, linkButtons(rule));
+      await finish(logId, { action: "click", reply: t, status: "done" });
+    } catch (e) { await finish(logId, { action: "click", status: "error", error: (e as Error).message }); }
     return;
   }
-  const rule = ctx.rules.find((r) => r.id === ruleId && r.active);
-  if (!rule) return;
-  const logId = await claim({ platform: p, kind: "message", event_id: eventId, user_id: sender, text, rule_id: rule.id });
-  if (!logId) return;
-  try {
-    let ok = true, name = "";
-    if (rule.require_follow && p === "ig") {
-      const prof = await graphGet(sender, { fields: "username,is_user_follow_business" }, ctx.conn.page_token);
-      ok = !!prof.is_user_follow_business; name = prof.username || "";
-    }
-    if (ok) {
-      // 確認追蹤後：送連結；有按鈕選單的話一起帶上主選單
-      const menu = hasMenu(rule);
-      const dm = menu ? startMessage(rule) : linkMessage(rule);
-      await sendDM({ id: sender }, dm, ctx, menu ? menuButtons(rule, rule.menu, true) : undefined);
-      await finish(logId, { action: "gate_ok", step: menu ? "root" : null, reply: dm, status: "done", user_name: name || null });
-    } else {
-      await sendDM({ id: sender }, ctx.settings.not_following, ctx, { title: ctx.settings.follow_button, payload: `GATE:${rule.id}` });
-      await finish(logId, { action: "gate_wait", reply: ctx.settings.not_following, status: "done", user_name: name || null });
-    }
-  } catch (e) {
-    await finish(logId, { status: "error", error: (e as Error).message });
+
+  // 2. 限動回覆／私訊關鍵字
+  const src: Source = storyId ? "story" : "dm";
+  const rule = text || storyId ? findRule(src, p, text, storyId, ctx) : null;
+  if (rule) {
+    const logId = await claim({ platform: p, kind: src === "story" ? "story" : "message", event_id: eventId, post_id: storyId || null, user_id: sender, text, rule_id: rule.id });
+    if (!logId) return;
+    try {
+      if (await alreadyGot(rule, sender)) { await finish(logId, { action: "skip", status: "skipped", error: "這個人已經收過這條規則的私訊" }); return; }
+      const r = await deliver(me, rule, p, ctx);
+      await finish(logId, { ...r, status: "done" });
+    } catch (e) { await finish(logId, { status: "error", error: (e as Error).message }); }
+    return;
   }
+
+  // 3. 自動回覆後 30 分鐘內說謝謝 → 回一句（同一個人一天一次）
+  if (ctx.settings.thanks_enabled && looksLikeThanks(text) && (ctx.settings.thanks_replies || []).length) {
+    const [{ data: recent }, { data: thanked }] = await Promise.all([
+      db.from("reply_log").select("id").eq("platform", p).eq("user_id", sender).in("action", ["greet", "sent", "click"]).eq("status", "done")
+        .gte("created_at", new Date(Date.now() - 30 * 60e3).toISOString()).limit(1),
+      db.from("reply_log").select("id").eq("platform", p).eq("user_id", sender).eq("action", "thanks")
+        .gte("created_at", new Date(Date.now() - 24 * 3600e3).toISOString()).limit(1),
+    ]);
+    if (recent?.length && !thanked?.length) {
+      const logId = await claim({ platform: p, kind: "message", event_id: eventId, user_id: sender, text });
+      if (!logId) return;
+      try {
+        const t = pick((ctx.settings.thanks_replies as string[]).filter(Boolean));
+        await send(me, t, ctx);
+        await finish(logId, { action: "thanks", reply: t, status: "done" });
+      } catch (e) { await finish(logId, { action: "thanks", status: "error", error: (e as Error).message }); }
+    }
+  }
+  // 其他私訊交給團主自己看
 }
 
 // ---------- 分派 ----------
@@ -416,16 +369,44 @@ async function handle(body: any) {
   }
 }
 
+// ---------- 後台挑貼文：最近的 IG 貼文、限動、FB 貼文 ----------
+async function listMedia() {
+  const { data: conn } = await db.from("meta_connection").select("*").eq("id", 1).maybeSingle();
+  if (!conn?.page_token) return { error: "還沒連接粉絲頁" };
+  const tok = conn.page_token;
+  const out: Record<string, unknown> = { ig: [], stories: [], fb: [] };
+  const jobs: Promise<void>[] = [];
+  if (conn.ig_user_id) {
+    jobs.push(graphGet(`${conn.ig_user_id}/media`, { fields: "id,caption,media_type,media_url,thumbnail_url,permalink,timestamp", limit: "36" }, tok)
+      .then((j) => { out.ig = (j.data || []).map((x: any) => ({ id: x.id, caption: x.caption || "", thumb: x.thumbnail_url || x.media_url || "", link: x.permalink, time: x.timestamp })); })
+      .catch((e) => { out.ig_error = e.message; }));
+    jobs.push(graphGet(`${conn.ig_user_id}/stories`, { fields: "id,media_type,media_url,thumbnail_url,permalink,timestamp" }, tok)
+      .then((j) => { out.stories = (j.data || []).map((x: any) => ({ id: x.id, caption: "", thumb: x.thumbnail_url || x.media_url || "", link: x.permalink, time: x.timestamp })); })
+      .catch((e) => { out.stories_error = e.message; }));
+  }
+  jobs.push(graphGet(`${conn.page_id}/posts`, { fields: "id,message,full_picture,permalink_url,created_time", limit: "24" }, tok)
+    .then((j) => { out.fb = (j.data || []).map((x: any) => ({ id: x.id, caption: x.message || "", thumb: x.full_picture || "", link: x.permalink_url, time: x.created_time })); })
+    .catch((e) => { out.fb_error = e.message; }));
+  await Promise.all(jobs);
+  return out;
+}
+
+const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type" };
+const json = (o: unknown) => new Response(JSON.stringify(o, null, 2), { headers: { "Content-Type": "application/json", ...CORS } });
+
 Deno.serve(async (req) => {
   const url = new URL(req.url);
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method === "GET") {
-    // Meta 設定 webhook 時的驗證
+    const mode = url.searchParams.get("hub.mode");
     const { data } = await db.from("reply_settings").select("verify_token").eq("id", 1).single();
-    if (url.searchParams.get("hub.mode") === "subscribe" && url.searchParams.get("hub.verify_token") === data?.verify_token) {
-      return new Response(url.searchParams.get("hub.challenge") || "", { status: 200 });
-    }
+    const okToken = !!data?.verify_token && url.searchParams.get("hub.verify_token") === data.verify_token;
+    // Meta 設定 webhook 時的驗證
+    if (mode === "subscribe" && okToken) return new Response(url.searchParams.get("hub.challenge") || "", { status: 200 });
+    // 後台挑貼文
+    if (mode === "media" && okToken) return json(await listMedia());
     // 檢查連線狀態（只回報訂閱與權限，不含權杖），要帶驗證權杖才能看
-    if (url.searchParams.get("hub.mode") === "check" && url.searchParams.get("hub.verify_token") === data?.verify_token) {
+    if (mode === "check" && okToken) {
       const { data: conn } = await db.from("meta_connection").select("*").eq("id", 1).maybeSingle();
       const out: Record<string, unknown> = { page: conn?.page_name, ig: conn?.ig_username };
       try {
@@ -434,9 +415,9 @@ Deno.serve(async (req) => {
         const dbg = await graphGet("debug_token", { input_token: conn.page_token }, appToken);
         out.token = { type: dbg.data?.type, valid: dbg.data?.is_valid, expires: dbg.data?.expires_at, scopes: dbg.data?.scopes };
       } catch (e) { out.error = (e as Error).message; }
-      return new Response(JSON.stringify(out, null, 2), { headers: { "Content-Type": "application/json" } });
+      return json(out);
     }
-    return new Response("forbidden", { status: 403 });
+    return new Response("forbidden", { status: 403, headers: CORS });
   }
   if (req.method !== "POST") return new Response("ok");
   const raw = await req.text();
