@@ -229,6 +229,8 @@
         <label class="check"><input type="checkbox" id="rsIg"> IG 留言</label>
         <label class="check"><input type="checkbox" id="rsFb"> FB 粉絲頁留言</label>
         <label class="check"><input type="checkbox" id="rsAi"> 用 AI 回答團購問題</label>
+        <label class="check" style="flex-basis:100%;margin-top:6px">只回覆這個時間之後發的貼文：<input class="input" type="datetime-local" id="rsSince" style="width:auto;padding:3px 8px;margin-left:4px"></label>
+        <small class="hint" style="margin:0;flex-basis:100%">更早的舊貼文交給 FB／IG 內建的自動回覆；規則勾了「舊貼文也適用」的例外。</small>
       </div>
 
       <nav class="seg subtabs" id="replySub">
@@ -253,6 +255,7 @@
             <label class="check"><input type="checkbox" id="rfActive" checked> 啟用</label>
             <label class="check"><input type="checkbox" id="rfIg" checked> IG</label>
             <label class="check"><input type="checkbox" id="rfFb" checked> FB 粉絲頁</label>
+            <label class="check"><input type="checkbox" id="rfAll"> 舊貼文也適用</label>
           </div>
           <div class="err" id="ruleErr" hidden></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
@@ -379,6 +382,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=20261006d"></script>
 <script src="admin.js?v=20261006d"></script>
-<script src="hub.js?v=20261006e"></script>
+<script src="hub.js?v=20261007a"></script>
 </body>
 </html>

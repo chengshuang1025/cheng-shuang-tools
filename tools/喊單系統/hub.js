@@ -123,6 +123,7 @@
   function renderSettings() {
     const s = H.settings; if (!s) return;
     $("rsEnabled").checked = s.enabled; $("rsIg").checked = s.ig_enabled; $("rsFb").checked = s.fb_enabled; $("rsAi").checked = s.ai_enabled;
+    $("rsSince").value = s.active_since ? GB.tw(s.active_since).slice(0, 16).replace(" ", "T") : "";
     $("tPublic").value = s.public_reply; $("tPrompt").value = s.follow_prompt; $("tButton").value = s.follow_button;
     $("tNot").value = s.not_following; $("tFb").value = s.fb_like_prompt; $("tStyle").value = s.ai_style;
     $("whUrl").textContent = FN + "meta-webhook"; $("whToken").textContent = s.verify_token;
@@ -136,6 +137,7 @@
   $("rsIg").onchange = (e) => saveSettings({ ig_enabled: e.target.checked }, "已儲存");
   $("rsFb").onchange = (e) => saveSettings({ fb_enabled: e.target.checked }, "已儲存");
   $("rsAi").onchange = (e) => saveSettings({ ai_enabled: e.target.checked }, "已儲存");
+  $("rsSince").onchange = (e) => { const v = e.target.value; saveSettings({ active_since: v ? new Date(v + ":00+08:00").toISOString() : null }, v ? "已儲存：這個時間之前的貼文不自動回覆" : "已儲存：所有貼文都會自動回覆"); };
   $("rs-texts").onsubmit = (e) => {
     e.preventDefault();
     saveSettings({ public_reply: $("tPublic").value.trim(), follow_prompt: $("tPrompt").value.trim(), follow_button: $("tButton").value.trim().slice(0, 20),
@@ -167,7 +169,7 @@
       return `<div class="rcard ${r.active ? "" : "off"}"><div>
         <div class="t">${esc(r.name || r.keywords.join("、"))}${r.active ? "" : "（停用中）"}</div>
         <div>${r.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>
-        <div class="hint" style="margin:2px 0 0">${r.require_follow ? "🔒 要先追蹤" : "直接給連結"}・${r.platforms.map((p) => (p === "ig" ? "IG" : "FB")).join("＋")}${camp ? `・${esc(camp.title)}` : ""}${r.link ? "" : `・<span style="color:var(--red)">還沒填連結</span>`}</div>
+        <div class="hint" style="margin:2px 0 0">${r.require_follow ? "🔒 要先追蹤" : "直接給連結"}・${r.platforms.map((p) => (p === "ig" ? "IG" : "FB")).join("＋")}${r.all_posts ? "・含舊貼文" : "・只限新貼文"}${camp ? `・${esc(camp.title)}` : ""}${r.link ? "" : `・<span style="color:var(--red)">還沒填連結</span>`}</div>
       </div><button class="btn small" type="button" data-rule="${r.id}">編輯</button></div>`;
     }).join("");
   }
@@ -181,7 +183,7 @@
     $("rfName").value = r?.name || ""; $("rfKeys").value = (r?.keywords || []).join(", ");
     $("rfCamp").value = r?.campaign_id || ""; $("rfMsg").value = r?.message || ""; $("rfLink").value = r?.link || "";
     $("rfFollow").checked = r ? r.require_follow : true; $("rfActive").checked = r ? r.active : true;
-    $("rfIg").checked = r ? r.platforms.includes("ig") : true; $("rfFb").checked = r ? r.platforms.includes("fb") : true;
+    $("rfIg").checked = r ? r.platforms.includes("ig") : true; $("rfFb").checked = r ? r.platforms.includes("fb") : true; $("rfAll").checked = !!r?.all_posts;
     $("ruleDel").hidden = !r; $("ruleErr").hidden = true;
     $("ruleForm").hidden = false; $("rfKeys").focus();
   }
@@ -191,7 +193,7 @@
       name: $("rfName").value.trim(), keywords: commas($("rfKeys").value),
       campaign_id: $("rfCamp").value ? +$("rfCamp").value : null,
       message: $("rfMsg").value.trim(), link: $("rfLink").value.trim(),
-      require_follow: $("rfFollow").checked, active: $("rfActive").checked,
+      require_follow: $("rfFollow").checked, active: $("rfActive").checked, all_posts: $("rfAll").checked,
       platforms: [$("rfIg").checked && "ig", $("rfFb").checked && "fb"].filter(Boolean),
     };
     const bad = !row.keywords.length ? "請至少填一個關鍵字" : !row.platforms.length ? "請至少勾一個平台" : row.link && !/^https?:\/\//i.test(row.link) ? "連結要以 https:// 開頭" : !row.link && !row.message ? "請填私訊內容或連結" : "";

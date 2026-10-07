@@ -73,9 +73,26 @@ async function claim(row: Record<string, unknown>) {
 }
 const finish = (id: number, patch: Record<string, unknown>) => db.from("reply_log").update(patch).eq("id", id);
 
-function matchRule(p: Platform, text: string, ctx: Ctx) {
+function matchRule(p: Platform, text: string, ctx: Ctx, oldPost = false) {
   const t = norm(text);
-  return ctx.rules.find((r) => r.active && r.platforms.includes(p) && r.keywords.some((k: string) => k && t.includes(norm(k))));
+  return ctx.rules.find((r) => r.active && (!oldPost || r.all_posts) && r.platforms.includes(p) && r.keywords.some((k: string) => k && t.includes(norm(k))));
+}
+
+// 這則留言所在的貼文，是不是在「開始自動回覆」之前發的？舊貼文交給 FB／IG 內建的自動回覆
+async function isOldPost(p: Platform, postId: string | undefined, ctx: Ctx) {
+  const since = ctx.settings.active_since ? Date.parse(ctx.settings.active_since) : 0;
+  if (!since || !postId) return false;
+  const { data: hit } = await db.from("post_times").select("created_at").eq("post_id", postId).maybeSingle();
+  let created = hit?.created_at ? Date.parse(hit.created_at) : NaN;
+  if (!hit) {
+    try {
+      const j = await graphGet(postId, { fields: p === "ig" ? "timestamp" : "created_time" }, ctx.conn.page_token);
+      const iso = p === "ig" ? j.timestamp : j.created_time;
+      created = iso ? Date.parse(iso) : NaN;
+      await db.from("post_times").upsert({ post_id: postId, created_at: isNaN(created) ? null : new Date(created).toISOString() });
+    } catch (_) { return false; }
+  }
+  return !isNaN(created) && created < since;
 }
 // 看起來像在問問題（問號、疑問詞、或提到團購相關字）
 const looksLikeQuestion = (t: string) =>
@@ -124,7 +141,8 @@ async function onComment(p: Platform, c: { id: string; userId: string; userName:
   const logId = await claim({ platform: p, kind: "comment", event_id: `${p}:c:${c.id}`, post_id: c.postId, user_id: c.userId, user_name: c.userName, text: c.text });
   if (!logId) return;
   try {
-    const rule = matchRule(p, c.text, ctx);
+    const oldPost = await isOldPost(p, c.postId, ctx);
+    const rule = matchRule(p, c.text, ctx, oldPost);
     if (rule) {
       let dm: string, button: { title: string; payload: string } | undefined, action: string;
       if (rule.require_follow) {
@@ -137,6 +155,7 @@ async function onComment(p: Platform, c: { id: string; userId: string; userName:
       await finish(logId, { rule_id: rule.id, action, reply: dm, status: "done" });
       return;
     }
+    if (oldPost) { await finish(logId, { action: "skip", status: "skipped", error: "舊貼文，交給 FB／IG 內建的自動回覆" }); return; }
     if (!ctx.settings.ai_enabled) return;
     // 只有「看起來在發問」的留言才問 AI（免費額度一天只有少量次數，像「吹風機」「謝謝分享」這類留言直接略過）
     if (!looksLikeQuestion(c.text)) { await finish(logId, { action: "skip", status: "skipped" }); return; }
