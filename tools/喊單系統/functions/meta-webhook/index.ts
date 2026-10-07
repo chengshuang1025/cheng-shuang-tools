@@ -258,9 +258,22 @@ async function handle(body: any) {
   const p: Platform | null = body.object === "instagram" ? "ig" : body.object === "page" ? "fb" : null;
   if (!p || (p === "ig" && !settings.ig_enabled) || (p === "fb" && !settings.fb_enabled)) return;
 
+  // 除錯用：只記事件種類，不記內容（到 Supabase → meta-webhook → Logs 看）
+  try {
+    console.log("evt", body.object, JSON.stringify((body.entry || []).map((e: any) => ({
+      changes: (e.changes || []).map((c: any) => c.field),
+      messaging: (e.messaging || []).map((m: any) => Object.keys(m).concat(Object.keys(m.message || {}).map((k) => "message." + k))),
+    }))));
+  } catch (_) { /* 忽略 */ }
+
   for (const entry of body.entry || []) {
     for (const ch of entry.changes || []) {
       const v = ch.value || {};
+      // 有些帳號的 IG 私訊會用 changes 格式送來
+      if ((ch.field === "messages" || ch.field === "messaging_postbacks") && v.sender) {
+        await onMessage(p, v, ctx);
+        continue;
+      }
       if (p === "ig" && ch.field === "comments") {
         if (!v.from?.id || v.from.id === conn.ig_user_id || v.from.id === entry.id) continue; // 自己的回覆不處理
         await onComment("ig", { id: v.id, userId: v.from.id, userName: v.from.username, text: v.text, postId: v.media?.id }, ctx);
