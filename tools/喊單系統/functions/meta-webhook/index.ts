@@ -61,7 +61,7 @@ async function sendDM(recipient: Record<string, string>, text: string, ctx: Ctx,
   } catch (e) {
     if (!button) throw e;
     // 有些情況不能帶按鈕：改成請對方回覆一句話
-    await graphPost(`${ctx.conn.page_id}/messages`, { recipient, message: { text: `${text}\n\n（完成後回覆我「好了」就可以領取喔）` } }, ctx.conn.page_token);
+    await graphPost(`${ctx.conn.page_id}/messages`, { recipient, message: { text: `${text}\n\n（按鈕不見的話，直接回覆我「好了」也可以領取 🎁）` } }, ctx.conn.page_token);
   }
 }
 
@@ -77,6 +77,11 @@ function matchRule(p: Platform, text: string, ctx: Ctx) {
   const t = norm(text);
   return ctx.rules.find((r) => r.active && r.platforms.includes(p) && r.keywords.some((k: string) => k && t.includes(norm(k))));
 }
+// 看起來像在問問題（問號、疑問詞、或提到團購相關字）
+const looksLikeQuestion = (t: string) =>
+  /[?？]|嗎|呢|什麼|甚麼|何時|幾號|幾點|多少|怎麼|如何|哪裡|哪邊|可以.{0,6}(買|訂|寄|用)|連結|開團|收團|價格|價錢|運費|免運|出貨|團購|還有|截止/.test(String(t || ""));
+// 私訊內容像是在說「我追蹤好了／按讚了，要領取」
+const looksLikeClaim = (t: string) => /好了|好囉|好喔|領取|追蹤|按讚|已讚|ok|OK|完成|\+1|要/.test(String(t || ""));
 const linkMessage = (rule: any) => [rule.message, rule.link].filter(Boolean).join("\n\n");
 
 // ---------- Gemini：判斷團購問題並回答 ----------
@@ -133,7 +138,11 @@ async function onComment(p: Platform, c: { id: string; userId: string; userName:
       return;
     }
     if (!ctx.settings.ai_enabled) return;
-    const ai = await askGemini(c.text, ctx);
+    // 只有「看起來在發問」的留言才問 AI（免費額度一天只有少量次數，像「吹風機」「謝謝分享」這類留言直接略過）
+    if (!looksLikeQuestion(c.text)) { await finish(logId, { action: "skip", status: "skipped" }); return; }
+    let ai;
+    try { ai = await askGemini(c.text, ctx); }
+    catch (e) { await finish(logId, { action: "ai", status: "needs_human", error: "AI 暫時無法回答（" + String((e as Error).message).slice(0, 80) + "），請團主回覆" }); return; }
     if (!ai) return;
     if (ai.intent === "groupbuy" && ai.can_answer && ai.answer) {
       await publicReply(p, c.id, ctx.settings.public_reply, ctx);
@@ -156,12 +165,21 @@ async function onMessage(p: Platform, m: any, ctx: Ctx) {
   const payload: string = m.message?.quick_reply?.payload || m.postback?.payload || "";
   const text: string = m.message?.text || m.postback?.title || "";
   let ruleId = payload.startsWith("GATE:") ? +payload.slice(5) : 0;
-  if (!ruleId) {
-    // 沒按按鈕而是打字：看這個人最近是不是在等領取
+  if (!ruleId && looksLikeClaim(text) && !matchRule(p, text, ctx)) {
+    // 按鈕不見了、改打字「好了」：先找這個人最近在等領取的規則
+    const since = new Date(Date.now() - 7 * 864e5).toISOString();
     const { data } = await db.from("reply_log").select("rule_id").eq("platform", p).eq("user_id", sender).eq("action", "gate_wait")
-      .gte("created_at", new Date(Date.now() - 7 * 864e5).toISOString()).order("created_at", { ascending: false }).limit(1);
+      .not("rule_id", "is", null).gte("created_at", since).order("created_at", { ascending: false }).limit(1);
     ruleId = data?.[0]?.rule_id || 0;
     if (!ruleId) {
+      // 留言和私訊的帳號編號有時對不上：改用這個平台最近 2 小時內有人在等的規則
+      const { data: d2 } = await db.from("reply_log").select("rule_id").eq("platform", p).eq("action", "gate_wait")
+        .not("rule_id", "is", null).gte("created_at", new Date(Date.now() - 2 * 3600e3).toISOString()).order("created_at", { ascending: false }).limit(1);
+      ruleId = d2?.[0]?.rule_id || 0;
+    }
+  }
+  if (!ruleId) {
+    {
       // 直接私訊關鍵字：跟留言一樣，要先追蹤的話先請對方追蹤／按讚，再按按鈕領取
       const r = matchRule(p, text, ctx);
       if (!r) return; // 一般私訊交給團主自己看
