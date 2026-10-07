@@ -3,6 +3,7 @@
 //   留言含關鍵字 → 公開回一句「已私訊妳囉」→ 私訊對方
 //     要先追蹤：私訊附「我追蹤好了，領取」按鈕 → 對方按下後，IG 查是否真的有追蹤，有才送連結；FB 無法查，按了就送
 //     不用追蹤：私訊直接送連結
+//     有「私訊按鈕選單」：私訊帶按鈕，按了送對應內容；每個按鈕可各自設定「要追蹤才給」
 //   沒有關鍵字 → 交給 Gemini 判斷是不是團購問題，資料裡有答案就私訊回答，沒有就留給團主處理
 // 需要的 Secrets：META_APP_SECRET、GEMINI_API_KEY（GEMINI_MODEL、GRAPH_VERSION 可不設）
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -57,16 +58,52 @@ async function publicReply(p: Platform, commentId: string, text: string, ctx: Ct
   else await graphPost(`${commentId}/comments`, { message: text }, ctx.conn.page_token);
 }
 // 私訊：recipient 可以是 {comment_id}（從留言私訊，只能一次）或 {id}（對方已經傳過訊息）
-async function sendDM(recipient: Record<string, string>, text: string, ctx: Ctx, button?: { title: string; payload: string }) {
-  const message: Record<string, unknown> = { text };
-  if (button) message.quick_replies = [{ content_type: "text", title: button.title.slice(0, 20), payload: button.payload }];
+type Btn = { title: string; payload: string };
+async function sendDM(recipient: Record<string, string>, text: string, ctx: Ctx, buttons?: Btn | Btn[]) {
+  const list = !buttons ? [] : Array.isArray(buttons) ? buttons.slice(0, 13) : [buttons];
+  const message: Record<string, unknown> = { text: String(text || "").slice(0, 1000) };
+  if (list.length) message.quick_replies = list.map((b) => ({ content_type: "text", title: b.title.slice(0, 20), payload: b.payload }));
   try {
     await graphPost(`${ctx.conn.page_id}/messages`, { recipient, message, ...(recipient.id ? { messaging_type: "RESPONSE" } : {}) }, ctx.conn.page_token);
   } catch (e) {
-    if (!button) throw e;
-    // 有些情況不能帶按鈕：改成請對方回覆一句話
-    await graphPost(`${ctx.conn.page_id}/messages`, { recipient, message: { text: `${text}\n\n（按鈕不見的話，直接回覆我「好了」也可以領取 🎁）` } }, ctx.conn.page_token);
+    if (!list.length) throw e;
+    // 有些情況不能帶按鈕：改成請對方打字回覆
+    const tip = list.length === 1 && list[0].payload.startsWith("GATE:")
+      ? "（按鈕不見的話，直接回覆我「好了」也可以領取 🎁）"
+      : `（按鈕不見的話，直接回覆按鈕上的字就可以：${list.map((b) => "「" + b.title + "」").join("、")}）`;
+    await graphPost(`${ctx.conn.page_id}/messages`, { recipient, message: { text: `${text}\n\n${tip}` } }, ctx.conn.page_token);
   }
+}
+
+// ---------- 私訊按鈕選單 ----------
+type Node = { id: string; title: string; text?: string; link?: string; follow?: boolean; children?: Node[] };
+const HOME = "🏠 回主選單";
+function findNode(nodes: Node[] = [], id: string): Node | null {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    const hit = findNode(n.children, id);
+    if (hit) return hit;
+  }
+  return null;
+}
+const hasMenu = (rule: any) => Array.isArray(rule?.menu) && rule.menu.length > 0;
+const anyFollow = (nodes: Node[] = []): boolean => nodes.some((n) => n.follow || anyFollow(n.children));
+// 某一層要顯示的按鈕：有下一層就列下一層；最後一層就給「回主選單」
+function menuButtons(rule: any, nodes: Node[] | undefined, atRoot: boolean): Btn[] {
+  const list = (nodes || []).filter((n) => n.title).map((n) => ({ title: n.title, payload: `FLOW:${rule.id}:${n.id}` }));
+  if (list.length) return list;
+  return atRoot ? [] : [{ title: HOME, payload: `FLOW:${rule.id}:root` }];
+}
+const nodeMessage = (n: Node) => [n.text, n.link].filter(Boolean).join("\n\n") || n.title;
+const startMessage = (rule: any) => linkMessage(rule) || "請選擇妳想要的 👇";
+// Meta 還沒核准讀取一般人私訊前，按鈕按了也收不到 → 一次把選單內容全部列出來
+function flatMenu(nodes: Node[] = [], depth = 0): string {
+  return nodes.filter((n) => n.title).map((n) => {
+    const head = depth ? `▸ ${n.title}` : `👉 ${n.title}`;
+    const body = [n.text, n.link].filter(Boolean).join("\n");
+    const sub = flatMenu(n.children, depth + 1);
+    return [head, body, sub].filter(Boolean).join("\n");
+  }).join("\n\n");
 }
 
 // 先寫一筆紀錄佔位，重複的通知就不會回兩次
@@ -104,6 +141,7 @@ const looksLikeQuestion = (t: string) =>
 // 私訊內容像是在說「我追蹤好了／按讚了，要領取」
 const looksLikeClaim = (t: string) => /好了|好囉|好喔|領取|追蹤|按讚|已讚|ok|OK|完成|\+1|要/.test(String(t || ""));
 const linkMessage = (rule: any) => [rule.message, rule.link].filter(Boolean).join("\n\n");
+const trustAsk = (p: Platform) => p === "ig" ? "喜歡的話記得追蹤 @cheng.shuang1025 喔 🥰 之後還有更多好玩的學習單！" : "喜歡的話記得幫好事丞雙的粉絲頁按個讚喔 🥰 之後還有更多好玩的學習單！";
 
 // ---------- Gemini：判斷團購問題並回答 ----------
 async function askGemini(text: string, ctx: Ctx) {
@@ -148,21 +186,24 @@ async function onComment(p: Platform, c: { id: string; userId: string; userName:
     const oldPost = await isOldPost(p, c.postId, ctx);
     const rule = matchRule(p, c.text, ctx, oldPost);
     if (rule) {
-      let dm: string, button: { title: string; payload: string } | undefined, action: string;
-      if (rule.require_follow && !VERIFY_FOLLOW) {
-        // 信任制：直接給連結，附一句請對方追蹤／按讚
+      let dm: string, buttons: Btn[] | undefined, action: string;
+      const menu = hasMenu(rule);
+      if (!VERIFY_FOLLOW) {
+        // 信任制：直接給連結（有按鈕選單的話一次全部列出來），要追蹤的附一句請對方追蹤／按讚
         // （Meta 還沒核准進階權限前，一般人的私訊回覆收不到，按鈕流程會卡住）
-        const ask = p === "ig" ? "喜歡的話記得追蹤 @cheng.shuang1025 喔 🥰 之後還有更多好玩的學習單！" : "喜歡的話記得幫好事丞雙的粉絲頁按個讚喔 🥰 之後還有更多好玩的學習單！";
-        dm = [linkMessage(rule), ask].filter(Boolean).join("\n\n");
+        const needAsk = rule.require_follow || (menu && anyFollow(rule.menu));
+        dm = [linkMessage(rule), menu ? flatMenu(rule.menu) : "", needAsk ? trustAsk(p) : ""].filter(Boolean).join("\n\n");
         action = "keyword";
       } else if (rule.require_follow) {
         dm = p === "ig" ? ctx.settings.follow_prompt : ctx.settings.fb_like_prompt;
-        button = { title: ctx.settings.follow_button, payload: `GATE:${rule.id}` };
+        buttons = [{ title: ctx.settings.follow_button, payload: `GATE:${rule.id}` }];
         action = "gate_wait";
+      } else if (menu) {
+        dm = startMessage(rule); buttons = menuButtons(rule, rule.menu, true); action = "flow";
       } else { dm = linkMessage(rule); action = "keyword"; }
       await publicReply(p, c.id, ctx.settings.public_reply, ctx);
-      await sendDM({ comment_id: c.id }, dm, ctx, button);
-      await finish(logId, { rule_id: rule.id, action, reply: dm, status: "done" });
+      await sendDM({ comment_id: c.id }, dm, ctx, buttons);
+      await finish(logId, { rule_id: rule.id, action, reply: dm, status: "done", step: action === "flow" ? "root" : null });
       return;
     }
     if (oldPost) { await finish(logId, { action: "skip", status: "skipped", error: "舊貼文，交給 FB／IG 內建的自動回覆" }); return; }
@@ -187,53 +228,129 @@ async function onComment(p: Platform, c: { id: string; userId: string; userName:
   }
 }
 
-// ---------- 私訊（按下領取按鈕、或回覆「好了」）----------
+// ---------- 私訊按鈕選單：按下某個按鈕 ----------
+// payload：FLOW:<規則>:<按鈕>（root＝主選單）；:chk＝IG 按「我追蹤好了」再查一次；:ok＝FB 按了「按讚好了」
+function parseFlow(s: string) {
+  const [, r, n, mode] = s.split(":");
+  return { ruleId: +r, step: n || "root", mode: mode || "" };
+}
+async function runFlow(p: Platform, sender: string, f: { ruleId: number; step: string; mode: string }, text: string, eventId: string, ctx: Ctx) {
+  const rule = ctx.rules.find((r) => r.id === f.ruleId && r.active);
+  if (!rule) return;
+  const logId = await claim({ platform: p, kind: "message", event_id: eventId, user_id: sender, text, rule_id: rule.id, step: f.step });
+  if (!logId) return;
+  try {
+    const node = f.step === "root" ? null : findNode(rule.menu, f.step);
+    if (!node) {
+      const dm = f.step === "root" ? startMessage(rule) : "這個選項已經更新囉，請重新選一次 👇";
+      await sendDM({ id: sender }, dm, ctx, menuButtons(rule, rule.menu, true));
+      await finish(logId, { action: "flow", step: "root", reply: dm, status: "done" });
+      return;
+    }
+    let name = "";
+    if (node.follow && VERIFY_FOLLOW) {
+      if (p === "ig") {
+        const prof = await graphGet(sender, { fields: "username,is_user_follow_business" }, ctx.conn.page_token);
+        name = prof.username || "";
+        if (!prof.is_user_follow_business) {
+          const dm = f.mode === "chk" ? ctx.settings.not_following : ctx.settings.follow_prompt;
+          await sendDM({ id: sender }, dm, ctx, { title: ctx.settings.follow_button, payload: `FLOW:${rule.id}:${node.id}:chk` });
+          await finish(logId, { action: "gate_wait", reply: dm, status: "done", user_name: name || null });
+          return;
+        }
+      } else if (f.mode !== "ok") {
+        // FB 查不到有沒有按讚：請對方按讚，按了「好了」就給
+        const dm = ctx.settings.fb_like_prompt;
+        await sendDM({ id: sender }, dm, ctx, { title: ctx.settings.follow_button, payload: `FLOW:${rule.id}:${node.id}:ok` });
+        await finish(logId, { action: "gate_wait", reply: dm, status: "done" });
+        return;
+      }
+    }
+    const dm = [nodeMessage(node), node.follow && !VERIFY_FOLLOW ? trustAsk(p) : ""].filter(Boolean).join("\n\n");
+    await sendDM({ id: sender }, dm, ctx, menuButtons(rule, node.children, false));
+    await finish(logId, { action: node.follow ? "gate_ok" : "flow", reply: dm, status: "done", user_name: name || null });
+  } catch (e) {
+    await finish(logId, { status: "error", error: (e as Error).message });
+  }
+}
+
+// 按鈕不見了、改打字：看這個人最近停在選單的哪一層，比對按鈕上的字
+async function guessFlow(p: Platform, sender: string, text: string, ctx: Ctx) {
+  const { data } = await db.from("reply_log").select("rule_id,step,action").eq("platform", p).eq("user_id", sender)
+    .not("rule_id", "is", null).not("step", "is", null).in("action", ["flow", "gate_wait", "gate_ok"])
+    .gte("created_at", new Date(Date.now() - 7 * 864e5).toISOString()).order("created_at", { ascending: false }).limit(1);
+  const last = data?.[0];
+  const rule = last && ctx.rules.find((r) => r.id === last.rule_id && r.active);
+  if (!rule || !hasMenu(rule)) return null;
+  if (last.action === "gate_wait" && last.step !== "root") {
+    return looksLikeClaim(text) ? { ruleId: rule.id, step: last.step, mode: p === "fb" ? "ok" : "chk" } : null;
+  }
+  const atRoot = last.step === "root";
+  const shown = menuButtons(rule, atRoot ? rule.menu : findNode(rule.menu, last.step)?.children, atRoot);
+  const t = norm(text);
+  if (!t) return null;
+  const hit = shown.find((b) => norm(b.title) === t)
+    || (t.length >= 2 ? shown.find((b) => norm(b.title).includes(t) || t.includes(norm(b.title).replace(/[^\p{L}\p{N}]/gu, ""))) : undefined);
+  return hit ? parseFlow(hit.payload) : null;
+}
+
+// ---------- 私訊（按按鈕、或打字回覆）----------
 async function onMessage(p: Platform, m: any, ctx: Ctx) {
   const sender = m.sender?.id;
   if (!sender || m.message?.is_echo || sender === ctx.conn.page_id || sender === ctx.conn.ig_user_id) return;
   const payload: string = m.message?.quick_reply?.payload || m.postback?.payload || "";
   const text: string = m.message?.text || m.postback?.title || "";
+  const eventId = `${p}:m:${m.message?.mid || m.postback?.mid || crypto.randomUUID()}`;
+
+  // 私訊按鈕選單
+  let flow = payload.startsWith("FLOW:") ? parseFlow(payload) : null;
+  if (!flow && !payload && text) flow = await guessFlow(p, sender, text, ctx);
+  if (flow) { await runFlow(p, sender, flow, text, eventId, ctx); return; }
+
   let ruleId = payload.startsWith("GATE:") ? +payload.slice(5) : 0;
   if (!ruleId && looksLikeClaim(text) && !matchRule(p, text, ctx)) {
     // 按鈕不見了、改打字「好了」：先找這個人最近在等領取的規則
     const since = new Date(Date.now() - 7 * 864e5).toISOString();
     const { data } = await db.from("reply_log").select("rule_id").eq("platform", p).eq("user_id", sender).eq("action", "gate_wait")
-      .not("rule_id", "is", null).gte("created_at", since).order("created_at", { ascending: false }).limit(1);
+      .is("step", null).not("rule_id", "is", null).gte("created_at", since).order("created_at", { ascending: false }).limit(1);
     ruleId = data?.[0]?.rule_id || 0;
     if (!ruleId) {
       // 留言和私訊的帳號編號有時對不上：改用這個平台最近 2 小時內有人在等的規則
       const { data: d2 } = await db.from("reply_log").select("rule_id").eq("platform", p).eq("action", "gate_wait")
-        .not("rule_id", "is", null).gte("created_at", new Date(Date.now() - 2 * 3600e3).toISOString()).order("created_at", { ascending: false }).limit(1);
+        .is("step", null).not("rule_id", "is", null).gte("created_at", new Date(Date.now() - 2 * 3600e3).toISOString()).order("created_at", { ascending: false }).limit(1);
       ruleId = d2?.[0]?.rule_id || 0;
     }
   }
   if (!ruleId) {
-    {
-      // 直接私訊關鍵字：跟留言一樣，要先追蹤的話先請對方追蹤／按讚，再按按鈕領取
-      const r = matchRule(p, text, ctx);
-      if (!r) return; // 一般私訊交給團主自己看
-      const mid = m.message?.mid || crypto.randomUUID();
-      const id0 = await claim({ platform: p, kind: "message", event_id: `${p}:m:${mid}`, user_id: sender, text, rule_id: r.id });
-      if (!id0) return;
-      try {
-        if (r.require_follow && VERIFY_FOLLOW) {
-          const dm = p === "ig" ? ctx.settings.follow_prompt : ctx.settings.fb_like_prompt;
-          await sendDM({ id: sender }, dm, ctx, { title: ctx.settings.follow_button, payload: `GATE:${r.id}` });
-          await finish(id0, { action: "gate_wait", reply: dm, status: "done" });
-        } else {
-          const dm = linkMessage(r);
-          await sendDM({ id: sender }, dm, ctx);
-          await finish(id0, { action: "keyword", reply: dm, status: "done" });
-        }
-      } catch (e) {
-        await finish(id0, { status: "error", error: (e as Error).message });
+    // 直接私訊關鍵字：跟留言一樣
+    const r = matchRule(p, text, ctx);
+    if (!r) return; // 一般私訊交給團主自己看
+    const id0 = await claim({ platform: p, kind: "message", event_id: eventId, user_id: sender, text, rule_id: r.id });
+    if (!id0) return;
+    try {
+      const menu = hasMenu(r);
+      if (r.require_follow && VERIFY_FOLLOW) {
+        const dm = p === "ig" ? ctx.settings.follow_prompt : ctx.settings.fb_like_prompt;
+        await sendDM({ id: sender }, dm, ctx, { title: ctx.settings.follow_button, payload: `GATE:${r.id}` });
+        await finish(id0, { action: "gate_wait", reply: dm, status: "done" });
+      } else if (menu && VERIFY_FOLLOW) {
+        const dm = startMessage(r);
+        await sendDM({ id: sender }, dm, ctx, menuButtons(r, r.menu, true));
+        await finish(id0, { action: "flow", step: "root", reply: dm, status: "done" });
+      } else {
+        const needAsk = r.require_follow || (menu && anyFollow(r.menu));
+        const dm = [linkMessage(r), menu ? flatMenu(r.menu) : "", needAsk ? trustAsk(p) : ""].filter(Boolean).join("\n\n");
+        await sendDM({ id: sender }, dm, ctx);
+        await finish(id0, { action: "keyword", reply: dm, status: "done" });
       }
-      return;
+    } catch (e) {
+      await finish(id0, { status: "error", error: (e as Error).message });
     }
+    return;
   }
   const rule = ctx.rules.find((r) => r.id === ruleId && r.active);
   if (!rule) return;
-  const logId = await claim({ platform: p, kind: "message", event_id: `${p}:m:${m.message?.mid || m.postback?.mid || crypto.randomUUID()}`, user_id: sender, text, rule_id: rule.id });
+  const logId = await claim({ platform: p, kind: "message", event_id: eventId, user_id: sender, text, rule_id: rule.id });
   if (!logId) return;
   try {
     let ok = true, name = "";
@@ -242,9 +359,11 @@ async function onMessage(p: Platform, m: any, ctx: Ctx) {
       ok = !!prof.is_user_follow_business; name = prof.username || "";
     }
     if (ok) {
-      const dm = linkMessage(rule);
-      await sendDM({ id: sender }, dm, ctx);
-      await finish(logId, { action: "gate_ok", reply: dm, status: "done", user_name: name || null });
+      // 確認追蹤後：送連結；有按鈕選單的話一起帶上主選單
+      const menu = hasMenu(rule);
+      const dm = menu ? startMessage(rule) : linkMessage(rule);
+      await sendDM({ id: sender }, dm, ctx, menu ? menuButtons(rule, rule.menu, true) : undefined);
+      await finish(logId, { action: "gate_ok", step: menu ? "root" : null, reply: dm, status: "done", user_name: name || null });
     } else {
       await sendDM({ id: sender }, ctx.settings.not_following, ctx, { title: ctx.settings.follow_button, payload: `GATE:${rule.id}` });
       await finish(logId, { action: "gate_wait", reply: ctx.settings.not_following, status: "done", user_name: name || null });

@@ -102,6 +102,27 @@
 .copyline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .copyline code{background:#fffdf7;border:1.5px solid var(--soft-line);border-radius:3px;padding:3px 8px;font-size:13px;overflow-wrap:anywhere;word-break:break-all}
 .roundbar .addform{flex-wrap:nowrap}
+.mtree{display:flex;flex-direction:column;gap:10px;margin:6px 0 8px}
+.mnode{border:1.5px solid var(--navy);border-left:5px solid var(--mustard);border-radius:4px;background:#fffdf7;padding:10px 10px 6px;display:flex;flex-direction:column;gap:6px}
+.mnode .mnode{border-left-color:var(--red)}
+.mnode .mnode .mnode{border-left-color:var(--navy)}
+.mhead{display:flex;gap:6px;align-items:center}
+.mhead .input{flex:1;min-width:0;font-weight:500}
+.mtag{flex:none;font-family:var(--f-head);font-size:12.5px;color:var(--muted);min-width:3.2em}
+.micon{flex:none;border:1.5px solid var(--navy);background:var(--paper);border-radius:4px;width:32px;height:34px;cursor:pointer;font-size:14px}
+.micon:disabled{opacity:.35;cursor:default}
+.mnode textarea{min-height:0}
+.mfoot{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.mfoot .check{margin:0}
+.mkids{display:flex;flex-direction:column;gap:8px;margin-left:14px;padding-left:10px;border-left:1.5px dashed var(--soft-line)}
+.phone{background:#fff;border:2px solid var(--navy);border-radius:18px;padding:14px 12px;max-width:360px;display:flex;flex-direction:column;gap:8px;font-size:14px;line-height:1.5}
+.bub{max-width:85%;padding:8px 12px;border-radius:16px;white-space:pre-wrap;word-break:break-word}
+.bub.me{align-self:flex-end;background:#3B6FE0;color:#fff;border-bottom-right-radius:4px}
+.bub.page{align-self:flex-start;background:#EFEFEF;color:#111;border-bottom-left-radius:4px}
+.bub.lock{background:var(--mustard-soft);color:var(--ink);font-size:12.5px}
+.qrs{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.qr{border:1.5px solid #3B6FE0;color:#3B6FE0;background:#fff;border-radius:999px;padding:4px 12px;font-size:13px;cursor:pointer}
+.qr:hover{background:#EAF0FD}
 </style>
 </head>
 <body>
@@ -241,7 +262,7 @@
       </nav>
 
       <div id="rs-rules">
-        <p class="hint">有人留言含有關鍵字（例如「學習單」），系統會先公開回一句「已私訊妳囉」，再私訊對方。勾「附上請追蹤的提醒」的話，私訊會在連結後面加一句「記得追蹤／按讚喔」（目前是信任制：Meta 還沒核准讀取一般人私訊的權限，所以先不檢查追蹤，核准後可改回確認追蹤才給）。</p>
+        <p class="hint">有人留言含有關鍵字（例如「學習單」），系統會先公開回一句「已私訊妳囉」，再私訊對方。每條規則可以加<b>私訊按鈕選單</b>（像 ManyChat）：粉絲點哪個按鈕就收到哪個內容，每個按鈕可以各自打開「🔒 要追蹤才給」。<br>⚠️ Meta 還沒核准私訊權限前是<b>信任制</b>：按鈕選單會一次全部列在私訊裡、要追蹤的附一句提醒；核准後在 Supabase 加 <code>VERIFY_FOLLOW=1</code>，就會變成真的按鈕＋確認追蹤。</p>
         <button class="btn primary" id="ruleNew" type="button" style="margin-bottom:12px">＋ 新增關鍵字規則</button>
         <form id="ruleForm" class="card dashed editor" hidden novalidate>
           <h3 id="ruleFormTitle" style="margin-top:0">新增關鍵字規則</h3>
@@ -251,7 +272,15 @@
             <div class="field span2"><label for="rfCamp">跟哪一團有關（選填）</label><select id="rfCamp"></select></div>
             <div class="field span2"><label for="rfMsg">私訊內容</label><textarea id="rfMsg" rows="3" placeholder="這是答應妳的學習單 🎁 下載後印 A4 就可以玩囉！"></textarea></div>
             <div class="field span2"><label for="rfLink">要送出的連結</label><input class="input" id="rfLink" type="url" placeholder="https://drive.google.com/…"><small>記得先把檔案上傳到雲端、開「知道連結的人都能檢視」再貼上</small></div>
-            <label class="check"><input type="checkbox" id="rfFollow" checked> 附上請追蹤的提醒</label>
+            <div class="field span2 menuwrap">
+              <label>💬 私訊按鈕選單（選填）</label>
+              <small>上面的私訊內容和連結會當「開場白」，按鈕跟著一起送出。粉絲點哪個按鈕，就私訊那個按鈕的內容；按鈕底下還可以再加下一層（最多 3 層）。</small>
+              <div id="menuTree" class="mtree"></div>
+              <div><button class="btn small" type="button" id="menuAdd">＋ 加一個按鈕</button></div>
+            </div>
+            <div class="field span2"><label>📱 粉絲看到的樣子（點按鈕試試）</label><div id="menuPreview" class="phone" aria-live="polite"></div>
+              <small>這是核准後的按鈕版。核准前（信任制）粉絲會一次收到所有按鈕的內容。</small></div>
+            <label class="check"><input type="checkbox" id="rfFollow" checked> 🔒 開場白就要追蹤才給</label>
             <label class="check"><input type="checkbox" id="rfActive" checked> 啟用</label>
             <label class="check"><input type="checkbox" id="rfIg" checked> IG</label>
             <label class="check"><input type="checkbox" id="rfFb" checked> FB 粉絲頁</label>
@@ -382,6 +411,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=20261006d"></script>
 <script src="admin.js?v=20261006d"></script>
-<script src="hub.js?v=20261007b"></script>
+<script src="hub.js?v=20261007c"></script>
 </body>
 </html>

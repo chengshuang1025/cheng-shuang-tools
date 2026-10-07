@@ -169,7 +169,7 @@
       return `<div class="rcard ${r.active ? "" : "off"}"><div>
         <div class="t">${esc(r.name || r.keywords.join("、"))}${r.active ? "" : "（停用中）"}</div>
         <div>${r.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>
-        <div class="hint" style="margin:2px 0 0">${r.require_follow ? "💌 附追蹤提醒" : "直接給連結"}・${r.platforms.map((p) => (p === "ig" ? "IG" : "FB")).join("＋")}${r.all_posts ? "・含舊貼文" : "・只限新貼文"}${camp ? `・${esc(camp.title)}` : ""}${r.link ? "" : `・<span style="color:var(--red)">還沒填連結</span>`}</div>
+        <div class="hint" style="margin:2px 0 0">${r.require_follow ? "🔒 要追蹤才給" : "直接給"}${menuCount(r.menu) ? `・💬 ${menuCount(r.menu)} 個按鈕${menuLocks(r.menu) ? `（${menuLocks(r.menu)} 個要追蹤）` : ""}` : ""}・${r.platforms.map((p) => (p === "ig" ? "IG" : "FB")).join("＋")}${r.all_posts ? "・含舊貼文" : "・只限新貼文"}${camp ? `・${esc(camp.title)}` : ""}${r.link || menuCount(r.menu) ? "" : `・<span style="color:var(--red)">還沒填連結</span>`}</div>
       </div><button class="btn small" type="button" data-rule="${r.id}">編輯</button></div>`;
     }).join("");
   }
@@ -185,6 +185,7 @@
     $("rfFollow").checked = r ? r.require_follow : true; $("rfActive").checked = r ? r.active : true;
     $("rfIg").checked = r ? r.platforms.includes("ig") : true; $("rfFb").checked = r ? r.platforms.includes("fb") : true; $("rfAll").checked = !!r?.all_posts;
     $("ruleDel").hidden = !r; $("ruleErr").hidden = true;
+    H.menu = JSON.parse(JSON.stringify(r?.menu || [])); H.pv = "root"; renderMenu();
     $("ruleForm").hidden = false; $("rfKeys").focus();
   }
   $("ruleForm").onsubmit = async (e) => {
@@ -195,8 +196,9 @@
       message: $("rfMsg").value.trim(), link: $("rfLink").value.trim(),
       require_follow: $("rfFollow").checked, active: $("rfActive").checked, all_posts: $("rfAll").checked,
       platforms: [$("rfIg").checked && "ig", $("rfFb").checked && "fb"].filter(Boolean),
+      menu: cleanMenu(H.menu),
     };
-    const bad = !row.keywords.length ? "請至少填一個關鍵字" : !row.platforms.length ? "請至少勾一個平台" : row.link && !/^https?:\/\//i.test(row.link) ? "連結要以 https:// 開頭" : !row.link && !row.message ? "請填私訊內容或連結" : "";
+    const bad = !row.keywords.length ? "請至少填一個關鍵字" : !row.platforms.length ? "請至少勾一個平台" : row.link && !/^https?:\/\//i.test(row.link) ? "連結要以 https:// 開頭" : !row.link && !row.message && !row.menu.length ? "請填私訊內容、連結，或加按鈕" : menuProblem(row.menu);
     if (bad) { $("ruleErr").textContent = bad; $("ruleErr").hidden = false; return; }
     const { error } = H.editRule ? await sb.from("reply_rules").update(row).eq("id", H.editRule) : await sb.from("reply_rules").insert(row);
     if (error) { $("ruleErr").textContent = errMsg(error); $("ruleErr").hidden = false; return; }
@@ -210,9 +212,105 @@
     $("ruleForm").hidden = true; H.rules = H.rules.filter((r) => r.id !== H.editRule); renderRules(); toast("已刪除");
   };
 
+
+  // ========== 私訊按鈕選單編輯器（像 ManyChat）==========
+  const MAX_DEPTH = 3, MAX_BTN = 10;
+  const HOME = "🏠 回主選單";
+  H.menu = []; H.pv = "root";
+  const newNode = () => ({ id: "b" + Math.random().toString(36).slice(2, 8), title: "", text: "", link: "", follow: false, children: [] });
+  const menuCount = (ns = []) => ns.reduce((a, n) => a + 1 + menuCount(n.children), 0);
+  const menuLocks = (ns = []) => ns.reduce((a, n) => a + (n.follow ? 1 : 0) + menuLocks(n.children), 0);
+  function locate(id, list = H.menu) {
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].id === id) return { node: list[i], list, i };
+      const hit = locate(id, list[i].children || []);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  function cleanMenu(ns = []) {
+    return ns.map((n) => ({ id: n.id, title: (n.title || "").trim().slice(0, 20), text: (n.text || "").trim(), link: (n.link || "").trim(), follow: !!n.follow, children: cleanMenu(n.children) }));
+  }
+  function menuProblem(ns, depth = 1) {
+    const seen = new Set();
+    for (const n of ns) {
+      if (!n.title) return `第 ${depth} 層有按鈕還沒寫按鈕上的字`;
+      if (seen.has(n.title)) return `同一層有兩個「${n.title}」按鈕，請改成不同的字`;
+      seen.add(n.title);
+      if (n.link && !/^https?:\/\//i.test(n.link)) return `「${n.title}」的連結要以 https:// 開頭`;
+      if (!n.text && !n.link && !n.children.length) return `「${n.title}」還沒填私訊內容、連結或下一層按鈕`;
+      const sub = menuProblem(n.children, depth + 1);
+      if (sub) return sub;
+    }
+    return "";
+  }
+  function treeHtml(ns, depth) {
+    return ns.map((n, i) => `<div class="mnode" data-mid="${n.id}">
+      <div class="mhead"><span class="mtag">${depth === 1 ? "按鈕" : `第 ${depth} 層`}</span>
+        <input class="input" data-k="title" maxlength="20" value="${esc(n.title)}" placeholder="按鈕上的字，例如：📝 領學習單" aria-label="按鈕上的字">
+        <button class="micon" type="button" data-mv="${n.id}" title="往上移" aria-label="往上移" ${i ? "" : "disabled"}>↑</button>
+        <button class="micon" type="button" data-rm="${n.id}" title="刪除這個按鈕" aria-label="刪除這個按鈕">✕</button></div>
+      <textarea data-k="text" rows="2" placeholder="粉絲點了之後，私訊的內容" aria-label="私訊內容">${esc(n.text)}</textarea>
+      <input class="input" data-k="link" type="url" value="${esc(n.link)}" placeholder="要送出的連結（選填）https://…" aria-label="連結">
+      <div class="mfoot"><label class="check"><input type="checkbox" data-k="follow" ${n.follow ? "checked" : ""}> 🔒 要追蹤才給</label>
+        ${depth < MAX_DEPTH ? `<button class="btn small" type="button" data-sub="${n.id}" ${(n.children || []).length >= MAX_BTN ? "disabled" : ""}>＋ 下一層按鈕</button>` : ""}</div>
+      ${(n.children || []).length ? `<div class="mkids">${treeHtml(n.children, depth + 1)}</div>` : ""}
+    </div>`).join("");
+  }
+  function renderMenu() {
+    $("menuTree").innerHTML = H.menu.length ? treeHtml(H.menu, 1) : `<p class="hint" style="margin:0">還沒有按鈕。只要直接送私訊內容和連結的話，這裡空著就好。</p>`;
+    $("menuAdd").disabled = H.menu.length >= MAX_BTN;
+    renderPreview();
+  }
+  function addTo(list) {
+    const n = newNode(); list.push(n); renderMenu();
+    const box = document.querySelector(`[data-mid="${n.id}"] [data-k="title"]`); if (box) box.focus();
+  }
+  $("menuAdd").onclick = () => addTo(H.menu);
+  $("menuTree").addEventListener("input", (e) => {
+    const k = e.target.dataset.k; if (!k) return;
+    const hit = locate(e.target.closest(".mnode").dataset.mid); if (!hit) return;
+    hit.node[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    renderPreview();
+  });
+  $("menuTree").addEventListener("click", (e) => {
+    const sub = e.target.closest("[data-sub]"), rm = e.target.closest("[data-rm]"), mv = e.target.closest("[data-mv]");
+    if (sub) { const h = locate(sub.dataset.sub); h.node.children = h.node.children || []; addTo(h.node.children); }
+    if (rm) {
+      const h = locate(rm.dataset.rm);
+      if (h.node.children?.length && !confirm(`「${h.node.title || "這個按鈕"}」底下還有 ${menuCount(h.node.children)} 個按鈕，要一起刪除嗎？`)) return;
+      h.list.splice(h.i, 1); if (locate(H.pv) === null) H.pv = "root"; renderMenu();
+    }
+    if (mv) { const h = locate(mv.dataset.mv); if (h.i) { [h.list[h.i - 1], h.list[h.i]] = [h.list[h.i], h.list[h.i - 1]]; renderMenu(); } }
+  });
+  // 預覽：像手機私訊畫面
+  function renderPreview() {
+    const box = $("menuPreview"); if (!box) return;
+    const at = H.pv === "root" ? null : locate(H.pv)?.node;
+    if (H.pv !== "root" && !at) H.pv = "root";
+    const bub = (cls, t) => `<div class="bub ${cls}">${esc(t)}</div>`;
+    let html = "", chips;
+    if (!at) {
+      const start = [$("rfMsg").value.trim(), $("rfLink").value.trim()].filter(Boolean).join("\n\n") || (H.menu.length ? "請選擇妳想要的 👇" : "（還沒有私訊內容）");
+      if ($("rfFollow").checked) html += bub("lock", "🔒 先請對方追蹤，確認後才送出 ↓");
+      html += bub("page", start);
+      chips = H.menu.filter((n) => n.title);
+    } else {
+      html += bub("me", at.title || "（按鈕）");
+      if (at.follow) html += bub("lock", "🔒 先確認有追蹤，才送出 ↓");
+      html += bub("page", [at.text, at.link].filter(Boolean).join("\n\n") || at.title);
+      chips = (at.children || []).filter((n) => n.title);
+    }
+    const qr = chips.map((n) => `<button class="qr" type="button" data-pv="${n.id}">${esc(n.title)}</button>`).join("")
+      || (at ? `<button class="qr" type="button" data-pv="root">${HOME}</button>` : "");
+    box.innerHTML = html + (qr ? `<div class="qrs">${qr}</div>` : "");
+  }
+  $("menuPreview").addEventListener("click", (e) => { const b = e.target.closest("[data-pv]"); if (b) { H.pv = b.dataset.pv; renderPreview(); } });
+  ["rfMsg", "rfLink", "rfFollow"].forEach((id) => $(id).addEventListener("input", renderPreview));
+
   // 紀錄
   const LOG_FILTERS = [["need", "要妳處理"], ["done", "已自動回覆"], ["all", "全部"]];
-  const ACTION_TXT = { keyword: "關鍵字", gate_ok: "已確認追蹤・送出連結", gate_wait: "請對方追蹤", ai: "AI 回答", skip: "略過" };
+  const ACTION_TXT = { keyword: "關鍵字", gate_ok: "已確認追蹤・送出內容", gate_wait: "請對方追蹤", flow: "按鈕選單", ai: "AI 回答", skip: "略過" };
   const STATUS_TXT = { done: ["p-ready", "已回覆"], skipped: ["p-wait", "略過"], needs_human: ["p-open", "要妳處理"], error: ["p-part", "出錯"] };
   async function loadLogs() {
     const { data, error } = await sb.from("reply_log").select("*").order("created_at", { ascending: false }).limit(100);
