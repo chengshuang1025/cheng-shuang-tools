@@ -1,0 +1,12 @@
+{
+  "name": "好事丞雙總後台",
+  "short_name": "丞雙總後台",
+  "start_url": "admin.html",
+  "scope": "./",
+  "display": "browser",
+  "background_color": "#EFE3CA",
+  "theme_color": "#1E2A4A",
+  "icons": [
+    { "src": "icon-1024.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" }
+  ]
+}

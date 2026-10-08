@@ -7,6 +7,9 @@
 <meta name="robots" content="noindex">
 <link rel="icon" href="icon-1024.png">
 <link rel="apple-touch-icon" href="icon-1024.png">
+<link rel="manifest" href="admin.webmanifest">
+<meta name="apple-mobile-web-app-title" content="丞雙總後台">
+<meta name="theme-color" content="#1E2A4A">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Huninn&family=Noto+Sans+TC:wght@400;500;700&family=Oswald:wght@500;600&display=swap">
 <link rel="stylesheet" href="style.css?v=20261006d">
@@ -177,6 +180,24 @@
 .setrow{border-top:1.5px dashed var(--soft-line);padding:14px 0}
 .setrow .hint{margin:6px 0 8px}
 .setrow .inline{margin-top:8px;font-size:14px;display:flex;align-items:center;gap:6px}
+/* 📱 手機版：分頁改成格子全部看得到、頁首縮小 */
+@media (max-width:640px){
+  .tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;overflow:visible;border-bottom:0;padding-bottom:0;margin-bottom:18px}
+  .tab{border-bottom:2px solid var(--navy);border-radius:8px;margin-bottom:0;padding:8px 4px;font-size:14.5px;white-space:normal;line-height:1.25;text-align:center;min-height:44px}
+  .tab.hub{border-bottom-color:var(--mustard)}
+  .tab .badge{margin-left:3px}
+  .stampwrap{padding:7px;margin-bottom:10px}
+  .chev{height:9px;background-size:12px 12px}
+  .topin{padding:10px 12px;gap:8px}
+  .brand{gap:10px}
+  .mark{width:40px;height:40px;font-size:17px}
+  .eyebrow{display:none}
+  h1{font-size:22px;letter-spacing:.04em}
+  .who{width:100%;justify-content:space-between;padding:4px 5px 4px 10px;font-size:13.5px}
+  .roundbar{gap:6px;margin-bottom:12px}
+  .roundbar select{flex:1;min-width:0;font-size:15px}
+  .roundbar .addform{flex-wrap:wrap}
+}
 @media (max-width:560px){.rpanel{padding:14px 12px 18px}.rc .acts{grid-template-columns:repeat(3,1fr)}.rtabs button{padding:6px 9px;font-size:13.5px}.prow{grid-template-columns:1fr auto}.prow .used{grid-column:1/-1}}
 </style>
 </head>
