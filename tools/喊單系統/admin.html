@@ -180,12 +180,41 @@
 .setrow{border-top:1.5px dashed var(--soft-line);padding:14px 0}
 .setrow .hint{margin:6px 0 8px}
 .setrow .inline{margin-top:8px;font-size:14px;display:flex;align-items:center;gap:6px}
+/* 📋 文案分頁 */
+.cpicker{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px 2px 10px;margin:0 -2px 4px;scroll-snap-type:x proximity}
+.cpicker::-webkit-scrollbar{display:none}
+.cpick{flex:none;scroll-snap-align:start;border:2px solid var(--navy);background:var(--paper);border-radius:8px;padding:7px 12px;font-family:var(--f-head);font-size:15px;line-height:1.3;text-align:left;color:var(--navy)}
+.cpick small{display:block;font-family:var(--f-body);font-size:11.5px;color:var(--muted)}
+.cpick[aria-selected="true"]{background:var(--navy);color:var(--paper)}
+.cpick[aria-selected="true"] small{color:var(--mustard-soft)}
+.chead{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between;background:var(--paper);border:2px solid var(--navy);border-left:6px solid var(--red);border-radius:4px;padding:12px 14px;margin-bottom:12px}
+.chead .t{font-family:var(--f-head);font-size:18px}
+.chead .m{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
+.clist{display:flex;flex-direction:column;gap:12px}
+.cblock{background:var(--paper);border:2px solid var(--navy);border-radius:4px;overflow:hidden}
+.cblock .bh{display:flex;align-items:center;gap:8px;padding:9px 10px 9px 14px;border-bottom:1.5px dashed var(--soft-line)}
+.cblock .bh b{font-family:var(--f-head);font-weight:400;font-size:16px;flex:1;min-width:0}
+.cblock .bh .cnt{font-family:var(--f-latin);font-size:12px;color:var(--muted);letter-spacing:.04em}
+.cblock .txt{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.65;padding:10px 14px;margin:0;font-family:var(--f-body);max-height:9.9em;overflow:hidden;position:relative}
+.cblock .txt.open{max-height:none}
+.cblock .txt:not(.open)::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2.4em;background:linear-gradient(transparent,var(--paper))}
+.cblock .txt.short::after{display:none}
+.cblock .warn{margin:0 14px 8px;font-size:12.5px;color:var(--red);background:var(--red-soft);border-radius:4px;padding:4px 8px}
+.cblock .bf{display:flex;gap:8px;padding:0 10px 10px}
+.cblock .bf .copybtn{flex:1;padding:11px 14px;font-size:16px}
+.cblock .bf .copybtn.done{background:var(--ready);border-color:var(--ready)}
+.cblock .ed{padding:10px}
+.cblock .ed input,.cblock .ed textarea{width:100%;border:1.5px solid var(--navy);border-radius:4px;background:#fffdf7;padding:8px 10px;font-size:15px}
+.cblock .ed textarea{min-height:260px;line-height:1.6;margin-top:8px}
+.cblock .ed .row2{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.cadd{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px}
 /* 📱 手機版：分頁改成格子全部看得到、頁首縮小 */
 @media (max-width:640px){
   .tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;overflow:visible;border-bottom:0;padding-bottom:0;margin-bottom:18px}
   .tab{border-bottom:2px solid var(--navy);border-radius:8px;margin-bottom:0;padding:8px 4px;font-size:14.5px;white-space:normal;line-height:1.25;text-align:center;min-height:44px}
   .tab.hub{border-bottom-color:var(--mustard)}
   .tab .badge{margin-left:3px}
+  .tab:last-child{grid-column:1/-1}
   .stampwrap{padding:7px;margin-bottom:10px}
   .chev{height:9px;background-size:12px 12px}
   .topin{padding:10px 12px;gap:8px}
@@ -267,6 +296,7 @@
 
     <nav class="tabs" role="tablist" id="tabs">
       <button class="tab hub" role="tab" data-p="camp" aria-selected="false" type="button">🧺 團購</button>
+      <button class="tab hub" role="tab" data-p="copy" aria-selected="false" type="button">📋 文案</button>
       <button class="tab hub" role="tab" data-p="reply" aria-selected="false" type="button">💬 自動回覆<span class="badge" id="replyBadge" hidden></span></button>
       <button class="tab" role="tab" data-p="ship" aria-selected="false" type="button">出貨申請<span class="badge" id="shipBadge" hidden></span></button>
       <button class="tab" role="tab" data-p="cust" aria-selected="true" type="button">客人總覽</button>
@@ -310,6 +340,13 @@
         </div>
       </form>
       <div id="campList" class="list"><p class="loading">讀取中…</p></div>
+    </section>
+
+    <section id="p-copy" hidden>
+      <p class="hint">選一團，按「複製」就能貼到社團、粉絲頁、IG、限動或 LINE。文案裡的「（團購連結）」會自動換成這團在「🧺 團購」填好的連結。</p>
+      <div class="cpicker" id="copyPick" role="listbox" aria-label="選擇團購"></div>
+      <label class="check" style="margin:0 0 12px"><input type="checkbox" id="copyEnded"> 也顯示已結束的團</label>
+      <div id="copyBody"><p class="loading">讀取中…</p></div>
     </section>
 
     <section id="p-reply" hidden>
@@ -587,7 +624,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=20261006d"></script>
-<script src="admin.js?v=20261006d"></script>
-<script src="hub.js?v=20261007d"></script>
+<script src="admin.js?v=20261008a"></script>
+<script src="hub.js?v=20261008a"></script>
 </body>
 </html>

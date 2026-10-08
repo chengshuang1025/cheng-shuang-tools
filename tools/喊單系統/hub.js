@@ -99,6 +99,133 @@
     $("campForm").hidden = true; toast("已刪除"); loadCamps();
   };
 
+  // ========== 📋 文案（每團的開團文案，手機一鍵複製）==========
+  const LINK_PH = "（團購連結）";
+  const CP_KEY = "cs-copy-camp";
+  Object.assign(H, { copyCamp: null, copyEdit: null, copyOpen: {} });
+  try { H.copyCamp = +localStorage.getItem(CP_KEY) || null; } catch (e) {}
+  const copyList = (c) => (Array.isArray(c?.copies) ? c.copies : []);
+  // 複製時把「（團購連結）」換成這團的連結
+  const finalText = (c, t) => (c.url ? String(t).split(LINK_PH).join(c.url) : String(t));
+  function copyCamps() {
+    const showEnded = $("copyEnded").checked;
+    return H.camps.filter((c) => showEnded || campState(c) !== "ended");
+  }
+  function renderCopy() {
+    const camps = copyCamps();
+    if (!camps.length) { $("copyPick").innerHTML = ""; $("copyBody").innerHTML = `<div class="card"><p class="hint" style="margin:0">目前沒有進行中或即將開團的團購。</p></div>`; return; }
+    if (!camps.some((c) => c.id === H.copyCamp)) {
+      H.copyCamp = (camps.find((c) => campState(c) === "active" && copyList(c).length) || camps.find((c) => campState(c) === "active") || camps[0]).id;
+    }
+    $("copyPick").innerHTML = camps.map((c) => {
+      const s = campState(c);
+      const d = c.start_date && c.end_date ? `${dlabel(c.start_date).replace(/（.）/, "")}–${dlabel(c.end_date).replace(/（.）/, "")}` : STATE_TXT[s][1];
+      return `<button class="cpick" type="button" role="option" data-cpk="${c.id}" aria-selected="${c.id === H.copyCamp}">${esc(c.title)}<small>${s === "active" ? "🟢 " : s === "upcoming" ? "🕒 " : ""}${d}・${copyList(c).length} 則</small></button>`;
+    }).join("");
+    const sel = $("copyPick").querySelector('[aria-selected="true"]');
+    if (sel) sel.scrollIntoView({ block: "nearest", inline: "nearest" });
+    renderCopyBody();
+  }
+  function renderCopyBody() {
+    const c = H.camps.find((x) => x.id === H.copyCamp); if (!c) return;
+    if (!("copies" in c)) { $("copyBody").innerHTML = `<div class="card"><p class="err" style="margin:0">資料庫還沒加上「文案」欄位，請先在 Supabase 執行 sql/12_開團文案.sql。</p></div>`; return; }
+    const [pc, pt] = STATE_TXT[campState(c)];
+    const range = c.start_date && c.end_date ? `${dlabel(c.start_date)} – ${dlabel(c.end_date)}` : "";
+    const list = copyList(c);
+    const head = `<div class="chead"><div style="min-width:0"><div class="t">${esc(c.title)}</div>
+        <div class="m"><span class="pill ${pc}">${pt}</span>${range ? `<span>${range}</span>` : ""}${c.url ? "" : `<span style="color:var(--red)">還沒填團購連結</span>`}</div></div>
+        ${c.url ? `<button class="btn small" type="button" data-cpurl="1">複製團購連結</button>` : ""}</div>`;
+    const blocks = list.map((it, i) => {
+      if (H.copyEdit === i) return `<div class="cblock"><div class="ed">
+          <input id="ceLabel" value="${esc(it.label || "")}" placeholder="標題，例如：💚 LINE 社群文" aria-label="標題">
+          <textarea id="ceText" aria-label="文案內容">${esc(it.text || "")}</textarea>
+          <div class="row2"><button class="btn primary" type="button" data-ce="save">儲存</button><button class="btn" type="button" data-ce="cancel">取消</button>
+          ${i > 0 ? `<button class="btn small" type="button" data-ce="up">往上移</button>` : ""}
+          <button class="btn red small" type="button" data-ce="del" style="margin-left:auto">刪除這則</button></div></div></div>`;
+      const t = String(it.text || "");
+      const warns = [];
+      if (t.includes(LINK_PH) && !c.url) warns.push("還沒有團購連結：先到「🧺 團購」填連結，複製時就會自動換上");
+      const other = (t.match(/（[^（）]*連結）/g) || []).filter((x) => x !== LINK_PH);
+      if (other.length) warns.push(`還有要自己換掉的地方：${[...new Set(other)].join("、")}`);
+      const short = t.split("\n").length <= 6 && t.length < 160;
+      const open = H.copyOpen[c.id + ":" + i];
+      return `<div class="cblock">
+        <div class="bh"><b>${esc(it.label || "文案")}</b><span class="cnt">${t.length} 字</span>
+          ${short ? "" : `<button class="btn small" type="button" data-cx="${i}">${open ? "收合" : "展開"}</button>`}</div>
+        <pre class="txt${open ? " open" : ""}${short ? " short" : ""}" data-cx="${i}">${esc(finalText(c, t))}</pre>
+        ${warns.map((w) => `<p class="warn">⚠️ ${esc(w)}</p>`).join("")}
+        <div class="bf"><button class="btn primary copybtn" type="button" data-cc="${i}">📋 複製</button><button class="btn" type="button" data-cedit="${i}">編輯</button></div>
+      </div>`;
+    }).join("");
+    $("copyBody").innerHTML = head + `<div class="clist">${blocks || `<div class="card"><p class="hint" style="margin:0">這團還沒有文案，按下面的「＋ 新增文案」加一則。</p></div>`}</div>
+      <div class="cadd"><button class="btn" type="button" data-cadd="1">＋ 新增文案</button></div>`;
+    if (H.copyEdit !== null) { const ta = $("ceText"); if (ta) ta.focus({ preventScroll: true }); }
+  }
+  async function writeClip(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) {
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+      let ok = false; try { ok = document.execCommand("copy"); } catch (e2) {}
+      ta.remove(); return ok;
+    }
+  }
+  async function saveCopies(c, list, msg) {
+    const { error } = await sb.from("campaigns").update({ copies: list }).eq("id", c.id);
+    if (error) { toast(errMsg(error)); return false; }
+    c.copies = list; toast(msg); return true;
+  }
+  $("copyEnded").onchange = renderCopy;
+  $("copyPick").onclick = (e) => {
+    const b = e.target.closest("[data-cpk]"); if (!b) return;
+    H.copyCamp = +b.dataset.cpk; H.copyEdit = null;
+    try { localStorage.setItem(CP_KEY, H.copyCamp); } catch (e2) {}
+    renderCopy();
+  };
+  $("copyBody").onclick = async (e) => {
+    const c = H.camps.find((x) => x.id === H.copyCamp); if (!c) return;
+    const list = copyList(c).slice();
+    const t = e.target;
+    let b;
+    if ((b = t.closest("[data-cc]"))) {
+      const it = list[+b.dataset.cc];
+      const ok = await writeClip(finalText(c, it.text || ""));
+      if (!ok) return toast("複製失敗，請按住文字自己選取複製");
+      b.classList.add("done"); b.textContent = "✓ 已複製";
+      setTimeout(() => { b.classList.remove("done"); b.textContent = "📋 複製"; }, 1800);
+      toast(`已複製「${it.label || "文案"}」`);
+    } else if ((b = t.closest("[data-cpurl]"))) {
+      if (await writeClip(c.url)) toast("已複製團購連結");
+    } else if ((b = t.closest("[data-cx]"))) {
+      const k = c.id + ":" + b.dataset.cx; H.copyOpen[k] = !H.copyOpen[k]; renderCopyBody();
+    } else if ((b = t.closest("[data-cedit]"))) {
+      H.copyEdit = +b.dataset.cedit; renderCopyBody();
+    } else if ((b = t.closest("[data-cadd]"))) {
+      list.push({ label: "", text: "" });
+      c.copies = list; H.copyEdit = list.length - 1; renderCopyBody();
+      $("ceLabel").focus();
+    } else if ((b = t.closest("[data-ce]"))) {
+      const i = H.copyEdit, act = b.dataset.ce;
+      if (act === "cancel") {
+        if (!list[i].label && !list[i].text) c.copies = list.filter((_, j) => j !== i); // 新增到一半取消
+        H.copyEdit = null; renderCopyBody(); return;
+      }
+      if (act === "save") {
+        const label = $("ceLabel").value.trim(), text = $("ceText").value.replace(/\s+$/, "");
+        if (!text) return toast("內容是空的");
+        list[i] = { label: label || "文案", text };
+        if (await saveCopies(c, list, "已儲存")) { H.copyEdit = null; renderCopy(); }
+      } else if (act === "up" && i > 0) {
+        [list[i - 1], list[i]] = [list[i], list[i - 1]];
+        if (await saveCopies(c, list, "已往上移")) { H.copyEdit = i - 1; renderCopyBody(); }
+      } else if (act === "del") {
+        if (!confirm(`確定刪除「${list[i].label || "這則文案"}」？`)) return;
+        list.splice(i, 1);
+        if (await saveCopies(c, list, "已刪除")) { H.copyEdit = null; renderCopy(); }
+      }
+    }
+  };
+
   // ========== 自動回覆（觸發規則／需要妳回／公開回覆庫／紀錄／設定）==========
   const SRC = { comment: ["💬", "貼文留言"], story: ["📱", "限動回覆"], dm: ["✉️", "私訊"] };
   const BTN_DEFAULT = "我想更了解這產品！";
@@ -570,6 +697,7 @@
   window.HUB = {
     onTab(k) {
       if (k === "camp" && !H.loaded.camp) { H.loaded.camp = 1; loadCamps(); }
+      if (k === "copy") { H.copyEdit = null; loadCamps().then(renderCopy); }
       if (k === "reply") { if (!H.loaded.reply) { H.loaded.reply = 1; loadReply(); } else loadLogs(); }
     },
   };
