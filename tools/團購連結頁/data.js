@@ -68,7 +68,7 @@ const GROUP_BUYS = [
       "從 3 歲玩到 13 歲，所有系列都能互相混搭",
       "踩到也不痛、可以水洗，收拾整理沒壓力"
     ],
-    image: "",
+    image: "assets/marioinex.jpg",
     url: "https://www.itsallaboutkids.com.tw/one/Marioinex-chengshuang",
     tag: "玩具",
     start: "2026-10-09",
